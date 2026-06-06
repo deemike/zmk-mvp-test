@@ -8,16 +8,27 @@
 
     default_transform: keymap_transform_0 {
         compatible = "zmk,matrix-transform";
-        columns = <1>;
-        rows = <1>;
+        columns = <2>;
+        rows = <2>;
         map = <
-            RC(0,0)
+            RC(0,0) RC(0,1)
+            RC(1,0) RC(1,1)
         >;
     };
 
     kscan0: kscan_0 {
-        compatible = "zmk,kscan-gpio-direct";
+        compatible = "zmk,kscan-gpio-matrix";
         label = "KSCAN";
-        input-gpios = <&gpio0 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        diode-direction = "col2row";
+
+        col-gpios
+            = <&gpio0 2 GPIO_ACTIVE_HIGH>  /* Пин D0 */
+            , <&gpio0 3 GPIO_ACTIVE_HIGH>  /* Пин D1 */
+            ;
+
+        row-gpios
+            = <&gpio0 28 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* Пин D2 */
+            , <&gpio0 29 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* Пин D3 */
+            ;
     };
 };
