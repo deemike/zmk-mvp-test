@@ -1,20 +1,23 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
-#include <zephyr/init.h>
 
-static int init_scanner(void) {
-    /* Обращаемся к uart1, который мы настроили в overlay */
+/* Выделяем сканеру собственную память и создаем независимый поток */
+#define SCANNER_STACK_SIZE 1024
+#define SCANNER_PRIORITY 7
+
+void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
     if (!device_is_ready(uart_dev)) {
-        return 0; /* Если порт не готов, просто выходим, чтобы не повесить систему */
+        return;
     }
 
-    /* Даем сканеру 500мс на загрузку после подачи питания */
-    k_msleep(500);
+    /* Ждем 2 полных секунды! Даем ZMK спокойно запустить USB и Bluetooth, 
+       а сканеру - полностью проснуться после подачи питания */
+    k_msleep(2000);
 
-    /* Команда для R502-F: "Включить синее кольцо, гореть постоянно" */
+    /* Магический пакет: Включить синее кольцо */
     uint8_t cmd[] = {
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 
         0x01, 0x00, 0x07,                   
@@ -22,12 +25,12 @@ static int init_scanner(void) {
         0x00, 0x42                          
     };
 
-    /* Отправляем байты по одному */
     for (int i = 0; i < sizeof(cmd); i++) {
         uart_poll_out(uart_dev, cmd[i]);
     }
-
-    return 0;
 }
 
-SYS_INIT(init_scanner, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+/* Ядро Zephyr само запустит этот поток параллельно клавиатуре */
+K_THREAD_DEFINE(scanner_tid, SCANNER_STACK_SIZE,
+                scanner_thread_func, NULL, NULL, NULL,
+                SCANNER_PRIORITY, 0, 0);
