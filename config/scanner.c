@@ -3,28 +3,16 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
 
-/* Регистрируем логгер */
 LOG_MODULE_REGISTER(scanner_fido, LOG_LEVEL_DBG);
 
 #define SCANNER_STACK_SIZE 1024
 #define SCANNER_PRIORITY 7
 
-/* Выделяем память под поток жестко */
 K_THREAD_STACK_DEFINE(scanner_stack_area, SCANNER_STACK_SIZE);
 struct k_thread scanner_thread_data;
 
 void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
-    LOG_INF("========================================");
-    LOG_INF("=  SCANNER FIDO THREAD IS ALIVE!!!     =");
-    LOG_INF("========================================");
-
     const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
-
-    if (!device_is_ready(uart_dev)) {
-        LOG_ERR("CRITICAL ERROR: UART1 device is NOT ready!");
-        return;
-    }
-    LOG_INF("SUCCESS: UART1 is ready and bound to pins D6 and D7.");
 
     uint8_t cmd[] = {
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 
@@ -34,15 +22,28 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     };
 
     while (1) {
+        /* Баннер крутится в цикле, мы его не пропустим при подключении */
+        LOG_INF("========================================");
+        LOG_INF("=  SCANNER FIDO THREAD IS ALIVE!!!     =");
+        LOG_INF("========================================");
+
+        if (!device_is_ready(uart_dev)) {
+            LOG_ERR("UART1 device is NOT ready! Retrying in 5s...");
+            k_msleep(5000);
+            continue; /* НЕ выходим из функции, просто идем на следующий круг */
+        }
+
+        LOG_INF("SUCCESS: UART1 is ready and active.");
+
         LOG_INF("Sending 16-byte wake-up command to GROW R502-F...");
         for (int i = 0; i < sizeof(cmd); i++) {
             uart_poll_out(uart_dev, cmd[i]);
         }
-        k_msleep(2000); 
+        
+        k_msleep(5000); /* Опрашиваем/маякуем каждые 5 секунд */
     }
 }
 
-/* Эта функция выполнится на уровне ядра при старте клавиатуры */
 static int init_scanner(void) {
     k_thread_create(&scanner_thread_data, scanner_stack_area,
                     K_THREAD_STACK_SIZEOF(scanner_stack_area),
