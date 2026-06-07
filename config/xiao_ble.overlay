@@ -45,7 +45,7 @@
 /* Активируем второй UART порт на этих ножках */
 &uart1 {
     status = "okay";
-    current-speed = <57600>;
+    current-speed = <115200>; /* Меняем скорость на высокую с 57600 */
     pinctrl-0 = <&uart1_default>;
     pinctrl-names = "default";
 };
