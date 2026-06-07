@@ -36,9 +36,8 @@
 &pinctrl {
     uart1_default: uart1_default {
         group1 {
-            /* Переворачиваем пины: */
-            psels = <NRF_PSEL(UART_TX, 1, 12)>, /* TX контроллера теперь на пин D7 (желтый) */
-                    <NRF_PSEL(UART_RX, 1, 11)>; /* RX контроллера теперь на пин D6 (коричневый) */
+            psels = <NRF_PSEL(UART_TX, 1, 11)>, /* TX контроллера строго на пин D6 */
+                    <NRF_PSEL(UART_RX, 1, 12)>; /* RX контроллера строго на пин D7 */
         };
     };
 };
