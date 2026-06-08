@@ -14,11 +14,11 @@ struct k_thread scanner_thread_data;
 void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
-    uint8_t cmd[] = {
+    uint8_t cmd_white_breathe[] = {
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 
         0x01, 0x00, 0x07,                   
-        0x35, 0x03, 0x00, 0x02, 0x00,       
-        0x00, 0x42                          
+        0x35, 0x01, 0x80, 0x07, 0x00,       
+        0x00, 0xC5                          
     };
 
     while (1) {
