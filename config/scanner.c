@@ -22,7 +22,6 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     };
 
     while (1) {
-        /* Баннер крутится в цикле, мы его не пропустим при подключении */
         LOG_INF("========================================");
         LOG_INF("=  SCANNER FIDO THREAD IS ALIVE!!!     =");
         LOG_INF("========================================");
@@ -30,17 +29,16 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
         if (!device_is_ready(uart_dev)) {
             LOG_ERR("UART1 device is NOT ready! Retrying in 5s...");
             k_msleep(5000);
-            continue; /* НЕ выходим из функции, просто идем на следующий круг */
+            continue; 
         }
 
         LOG_INF("SUCCESS: UART1 is ready and active.");
-
         LOG_INF("Sending 16-byte wake-up command to GROW R502-F...");
         for (int i = 0; i < sizeof(cmd); i++) {
             uart_poll_out(uart_dev, cmd[i]);
         }
         
-        k_msleep(5000); /* Опрашиваем/маякуем каждые 5 секунд */
+        k_msleep(5000); 
     }
 }
 
