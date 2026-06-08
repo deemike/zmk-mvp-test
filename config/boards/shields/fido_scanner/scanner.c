@@ -14,11 +14,11 @@ struct k_thread scanner_thread_data;
 void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
-    uint8_t cmd_yellow_breathe[] = {
+    uint8_t cmd_white_breathe[] = {
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,  // Заголовок и адрес
-        0x01, 0x00, 0x07,                    // Пакет команд (длина строго 0x07)
-        0x35, 0x01, 0xFF, 0x05, 0x00,        // CMD(0x35), Ctrl(Дыхание), Speed(0xFF - мин), Color(0x03 - Пурпурный), Cycles(0)
-        0x01, 0x42                           // Пересчитанная контрольная сумма
+        0x01, 0x00, 0x07,                    // Пакет команд (длина 7)
+        0x35, 0x01, 0xFF, 0x07, 0x00,        // CMD(0x35), Ctrl(Дыхание), Speed(0xFF - мин), Color(0x07 - Белый), Cycles(0)
+        0x01, 0x44                           // НОВАЯ контрольная сумма
     };
 
     while (1) {
@@ -34,8 +34,8 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
 
         LOG_INF("SUCCESS: UART1 is ready and active.");
         LOG_INF("Sending 16-byte wake-up command to GROW R502-F...");
-        for (int i = 0; i < sizeof(cmd_yellow_breathe); i++) {
-            uart_poll_out(uart_dev, cmd_yellow_breathe[i]);
+        for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
+            uart_poll_out(uart_dev, cmd_white_breathe[i]);
         }
         
         k_msleep(5000); 
