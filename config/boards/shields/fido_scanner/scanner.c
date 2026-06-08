@@ -14,11 +14,11 @@ struct k_thread scanner_thread_data;
 void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
-    uint8_t cmd_white_breathe[] = {
+    uint8_t cmd_purple_breathe[] = {
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,  // Заголовок и адрес
-        0x01, 0x00, 0x03,                    // Пакет команд (длина 7)
-        0x35, 0x01, 0xFF, 0x03, 0x00,        // CMD(0x35), Ctrl(Дыхание), Speed(0xFF - мин), Color(0x07 - Белый), Cycles(0)
-        0x01, 0x44                           // НОВАЯ контрольная сумма
+        0x01, 0x00, 0x07,                    // Пакет команд (длина строго 0x07)
+        0x35, 0x01, 0xFF, 0x03, 0x00,        // CMD(0x35), Ctrl(Дыхание), Speed(0xFF - мин), Color(0x03 - Пурпурный), Cycles(0)
+        0x01, 0x40                           // Пересчитанная контрольная сумма
     };
 
     while (1) {
