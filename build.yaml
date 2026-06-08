@@ -1,4 +1,3 @@
 ---
 include:
-  - board: xiao_ble/zmk
-    shield: fido_scanner
+  - board: seeed_xiao_ble/zmk
