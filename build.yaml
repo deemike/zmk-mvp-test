@@ -1,5 +1,4 @@
 ---
 include:
   - board: xiao_ble//zmk
-  - board: xiao_ble//zmk
-    shield: settings_reset
+    shield: fido_scanner
