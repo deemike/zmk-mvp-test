@@ -34,8 +34,8 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
 
         LOG_INF("SUCCESS: UART1 is ready and active.");
         LOG_INF("Sending 16-byte wake-up command to GROW R502-F...");
-        for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
-            uart_poll_out(uart_dev, cmd_white_breathe[i]);
+        for (int i = 0; i < sizeof(cmd_purple_breathe); i++) {
+            uart_poll_out(uart_dev, cmd_purple_breathe[i]);
         }
         
         k_msleep(5000); 
