@@ -52,39 +52,31 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
 
     LOG_INF("SUCCESS: UART1 is ready. Configuring interrupts...");
     
-    /* Привязываем коллбэк и включаем прерывания на прием (RX) */
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
 
-    /* Задержка 5 секунд для подключения терминала */
-    LOG_INF("Waiting 5 seconds for terminal to connect...");
+    LOG_INF("Terminal wait (5s)...");
     k_msleep(5000);
 
-    /* БУДИМ СКАНЕР: отправляем 16 нулевых байтов */
-    LOG_INF("Waking up scanner with NULL bytes...");
-    for (int i = 0; i < 16; i++) {
-        uart_poll_out(uart_dev, 0x00);
-    }
-    /* Ждем 100 мс, пока чип сканера загрузится после сна */
-    k_msleep(100);
-
-    /* Очищаем кольцевой буфер от мусора, который мог прилететь при пробуждении */
-    ring_buf_reset(&rx_ringbuf);
-
-    /* Отправка самой команды на подсветку */
-    LOG_INF("Sending command to scanner...");
-    for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
-        uart_poll_out(uart_dev, cmd_white_breathe[i]);
-    }
+    uint32_t counter = 0;
 
     while (1) {
         uint8_t rx_byte;
         
-        /* Выводим все принятые байты из кольцевого буфера */
+        /* Быстро вычитываем всё, что пришло от сканера */
         while (ring_buf_get(&rx_ringbuf, &rx_byte, 1) > 0) {
             LOG_INF("RX: 0x%02X", rx_byte);
         }
 
+        /* Каждые 2 секунды (40 тиков по 50 мс) отправляем команду */
+        if (counter % 40 == 0) {
+            LOG_INF("Sending command to scanner...");
+            for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
+                uart_poll_out(uart_dev, cmd_white_breathe[i]);
+            }
+        }
+        
+        counter++;
         k_msleep(50); 
     }
 }
