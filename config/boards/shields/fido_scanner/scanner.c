@@ -38,11 +38,10 @@ static void uart_cb(const struct device *dev, void *user_data) {
 void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
-    uint8_t cmd_white_breathe[] = {
+    /* Простая и надежная команда "Read Sys Parameters" (запрос статуса) */
+    uint8_t cmd_handshake[] = {
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-        0x01, 0x00, 0x07,
-        0x35, 0x01, 0xFF, 0x07, 0x00,
-        0x01, 0x44
+        0x01, 0x00, 0x03, 0x0F, 0x00, 0x13
     };
 
     if (!device_is_ready(uart_dev)) {
@@ -68,11 +67,11 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
             LOG_INF("RX: 0x%02X", rx_byte);
         }
 
-        /* Каждые 2 секунды (40 тиков по 50 мс) отправляем команду */
+        /* Каждые 2 секунды шлем запрос статуса */
         if (counter % 40 == 0) {
-            LOG_INF("Sending command to scanner...");
-            for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
-                uart_poll_out(uart_dev, cmd_white_breathe[i]);
+            LOG_INF("Sending handshake command...");
+            for (int i = 0; i < sizeof(cmd_handshake); i++) {
+                uart_poll_out(uart_dev, cmd_handshake[i]);
             }
         }
         
