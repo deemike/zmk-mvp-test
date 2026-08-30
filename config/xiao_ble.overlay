@@ -44,7 +44,7 @@
 
 &uart1 {
     status = "okay";
-    current-speed = <57600>;
+    current-speed = <115200>;
     pinctrl-0 = <&uart1_default>;
     pinctrl-names = "default";
 };
