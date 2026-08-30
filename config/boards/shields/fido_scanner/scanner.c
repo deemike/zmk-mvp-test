@@ -25,17 +25,13 @@ static void uart_cb(const struct device *dev, void *user_data) {
         return;
     }
 
-    /* Добавляем проверку на ошибки UART (Framing, Parity, Overrun) */
-    if (uart_irq_err(dev)) {
-        int err = uart_err_check(dev);
-        LOG_ERR("UART Error: %d", err);
-    }
-
-    if (uart_irq_rx_ready(dev)) {
+    /* Вычитываем все байты из аппаратного FIFO, пока они есть */
+    while (uart_irq_rx_ready(dev)) {
         recv_len = uart_fifo_read(dev, rx_data, sizeof(rx_data));
-        if (recv_len > 0) {
-            ring_buf_put(&rx_ringbuf, rx_data, recv_len);
+        if (recv_len <= 0) {
+            break;
         }
+        ring_buf_put(&rx_ringbuf, rx_data, recv_len);
     }
 }
 
@@ -60,11 +56,11 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
 
-    /* Даем 5 секунд, чтобы успеть переключиться в окно PuTTY */
+    /* Задержка 5 секунд для подключения PuTTY */
     LOG_INF("Waiting 5 seconds for PuTTY to connect...");
     k_msleep(5000);
 
-    /* Тестовая отправка команды на сканер один раз при старте */
+    /* Отправка команды на сканер */
     LOG_INF("Sending command to scanner...");
     for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
         uart_poll_out(uart_dev, cmd_white_breathe[i]);
@@ -73,14 +69,12 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     while (1) {
         uint8_t rx_byte;
         
-        /* Читаем байты из буфера поштучно, пока они там есть */
+        /* Выводим все принятые байты из кольцевого буфера */
         while (ring_buf_get(&rx_ringbuf, &rx_byte, 1) > 0) {
-            LOG_INF("RX: %02X", rx_byte);
-            /* В следующем шаге мы добавим сюда парсер для сборки пакета ответа */
+            LOG_INF("RX: 0x%02X", rx_byte);
         }
 
-        /* Спим 100 мс, чтобы не грузить ядро, и снова проверяем буфер */
-        k_msleep(100); 
+        k_msleep(50); 
     }
 }
 
