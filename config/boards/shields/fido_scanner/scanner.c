@@ -56,11 +56,16 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
 
-    /* Задержка 5 секунд для подключения PuTTY */
-    LOG_INF("Waiting 5 seconds for PuTTY to connect...");
+    /* Задержка 5 секунд для подключения терминала */
+    LOG_INF("Waiting 5 seconds for terminal to connect...");
     k_msleep(5000);
 
-    /* Отправка команды на сканер */
+    /* БУДИМ СКАНЕР! Отправляем холостой байт и ждем 50 мс */
+    LOG_INF("Waking up scanner...");
+    uart_poll_out(uart_dev, 0x00);
+    k_msleep(50);
+
+    /* Отправка самой команды на подсветку */
     LOG_INF("Sending command to scanner...");
     for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
         uart_poll_out(uart_dev, cmd_white_breathe[i]);
