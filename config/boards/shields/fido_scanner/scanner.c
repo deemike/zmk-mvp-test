@@ -25,11 +25,15 @@ static void uart_cb(const struct device *dev, void *user_data) {
         return;
     }
 
-    /* Если есть входящие данные на линии RX */
+    /* Добавляем проверку на ошибки UART (Framing, Parity, Overrun) */
+    if (uart_irq_err(dev)) {
+        int err = uart_err_check(dev);
+        LOG_ERR("UART Error: %d", err);
+    }
+
     if (uart_irq_rx_ready(dev)) {
         recv_len = uart_fifo_read(dev, rx_data, sizeof(rx_data));
         if (recv_len > 0) {
-            /* Складываем принятые байты в кольцевой буфер */
             ring_buf_put(&rx_ringbuf, rx_data, recv_len);
         }
     }
