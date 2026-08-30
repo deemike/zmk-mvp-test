@@ -56,7 +56,12 @@ void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
 
+    /* Даем 5 секунд, чтобы успеть переключиться в окно PuTTY */
+    LOG_INF("Waiting 5 seconds for PuTTY to connect...");
+    k_msleep(5000);
+
     /* Тестовая отправка команды на сканер один раз при старте */
+    LOG_INF("Sending command to scanner...");
     for (int i = 0; i < sizeof(cmd_white_breathe); i++) {
         uart_poll_out(uart_dev, cmd_white_breathe[i]);
     }
