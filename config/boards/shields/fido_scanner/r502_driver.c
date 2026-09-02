@@ -79,11 +79,11 @@ int r502_set_led(const struct device *uart_dev,
                  uint8_t color,
                  uint8_t count) {
     uint8_t params[4] = { mode, speed, color, count };
-    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, K_MSEC(400));
 }
 
 int r502_get_image(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, K_MSEC(400));
 }
 
 int r502_image_to_tz(const struct device *uart_dev, uint8_t buffer_id) {

@@ -253,7 +253,7 @@ static void do_verify_finger(void) {
 
     if (ret != R502_ACK_OK) {
         LOG_DBG("GetImage: no finger captured (0x%02X)", ret);
-        r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0x15, R502_LED_COLOR_BLUE, 0);
+        r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return;
     }
@@ -264,6 +264,7 @@ static void do_verify_finger(void) {
         LOG_WRN("Img2Tz failed: 0x%02X", ret);
         r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x15, R502_LED_COLOR_RED, 2);
         k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return;
     }
@@ -283,10 +284,10 @@ static void do_verify_finger(void) {
     }
 
     /* Ожидание снятия пальца */
-    wait_finger_release(3000);
+    wait_finger_release(2500);
 
-    /* Возврат в фоновую индикацию */
-    r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0x15, R502_LED_COLOR_BLUE, 0);
+    /* Возврат в фоновую сиреневую подсветку */
+    r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
 }
 
@@ -325,24 +326,29 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     }
 
     /* Пауза для стабилизации питания сенсора и USB-консоли */
-    LOG_INF("Waiting for R502-F sensor boot (3s)...");
-    k_msleep(3000);
+    LOG_INF("Waiting for R502-F sensor boot (2.5s)...");
+    k_msleep(2500);
 
-    /* Сбрасываем ложные прерывания, возникшие при переходных процессах подачи питания */
+    /* Сбрасываем переходные прерывания */
     k_sem_reset(&touch_sem);
 
-    /* Проверка подключения сканера и количества сохраненных шаблонов */
-    uint16_t tmpl_count = 0;
-    int ret = r502_get_template_count(uart_dev, &tmpl_count);
-    if (ret == R502_ACK_OK) {
-        enrolled_templates_count = tmpl_count;
-        LOG_INF("R502-F sensor connected! Enrolled templates in Flash: %u", enrolled_templates_count);
-    } else {
-        LOG_WRN("Could not read template count (code 0x%02X). Sensor may be booting...", ret);
+    int pin_lvl = -1;
+    if (touch_dev && device_is_ready(touch_dev)) {
+        pin_lvl = gpio_pin_get(touch_dev, TOUCH_PIN);
+    }
+    LOG_INF("Initial Touch GPIO level: %d", pin_lvl);
+
+    /* Инициализируем фоновую сиреневую подсветку сканера (Speed 0xFF) */
+    LOG_INF("Initializing Aura LED (Purple breathe)...");
+    for (int i = 0; i < 3; i++) {
+        int r = r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
+        if (r == R502_ACK_OK) {
+            LOG_INF("Aura LED initialized successfully!");
+            break;
+        }
+        k_msleep(300);
     }
 
-    /* Установка фоновой плавной синей подсветки */
-    r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0x15, R502_LED_COLOR_BLUE, 0);
     LOG_INF("Dixo Keyboard biometric scanner ready!");
 
     while (1) {
@@ -353,32 +359,20 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             continue;
         }
 
-        /* Ожидание сигнала касания по прерыванию GPIO (или тайм-аут 1 секунда) */
-        int sem_res = k_sem_take(&touch_sem, K_MSEC(1000));
+        /* Ожидание ТОЛЬКО аппаратного прерывания касания (Edge Rising) */
+        int sem_res = k_sem_take(&touch_sem, K_MSEC(3000));
 
-        /* Проверяем аппаратное касание (по семафору или высокому уровню пина D5) */
-        if (sem_res == 0 || is_finger_present()) {
-            LOG_INF("Touch event detected! Starting processing...");
+        if (sem_res == 0) {
+            LOG_INF("Touch event detected! Processing verification...");
+            k_msleep(50);
 
-            /* Если количество шаблонов еще неизвестно (было 0 из-за таймаута при старте), перепроверяем у сенсора */
-            if (enrolled_templates_count == 0) {
-                uint16_t count = 0;
-                if (r502_get_template_count(uart_dev, &count) == R502_ACK_OK) {
-                    enrolled_templates_count = count;
-                    LOG_INF("Refreshed enrolled templates from sensor: %u", enrolled_templates_count);
-                }
-            }
-
-            /* Если в базе действительно нет ни одного пальца — запускаем регистрацию Слота 0 */
-            if (enrolled_templates_count == 0) {
-                LOG_INF("No fingerprints in database! Automatically enrolling Master Finger (Slot 0)...");
-                do_enroll_finger(0);
-            } else {
-                do_verify_finger();
-            }
+            do_verify_finger();
 
             /* Сбрасываем накопившиеся события семафора после завершения операции */
             k_sem_reset(&touch_sem);
+        } else {
+            /* Поддержание сиреневого дыхания в фоне */
+            r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
         }
     }
 }

@@ -38,3 +38,8 @@
     status = "okay";
     current-speed = <57600>;
 };
+
+/* Отключаем I2C0, чтобы освободить пин D5 (P0.05) под Touch Sensing */
+&i2c0 {
+    status = "disabled";
+};
