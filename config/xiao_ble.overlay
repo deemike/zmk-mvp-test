@@ -1,5 +1,4 @@
 #include <dt-bindings/zmk/matrix_transform.h>
-#include <dt-bindings/zmk/keys.h>
 
 / {
     chosen {
@@ -23,25 +22,14 @@
         diode-direction = "col2row";
 
         col-gpios
-            = <&gpio0 2 GPIO_ACTIVE_HIGH>
-            , <&gpio0 3 GPIO_ACTIVE_HIGH>
+            = <&gpio0 2 GPIO_ACTIVE_HIGH>  /* Пин D0 */
+            , <&gpio0 3 GPIO_ACTIVE_HIGH>  /* Пин D1 */
             ;
 
         row-gpios
-            = <&gpio0 28 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-            , <&gpio0 29 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            = <&gpio0 28 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* Пин D2 */
+            , <&gpio0 29 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* Пин D3 */
             ;
-    };
-
-    keymap {
-        compatible = "zmk,keymap";
-
-        default_layer {
-            bindings = <
-                &kp A &kp B
-                &kp C &kp D
-            >;
-        };
     };
 };
 
