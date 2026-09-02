@@ -33,7 +33,7 @@ static void uart_cb(const struct device *dev, void *user_data) {
 }
 
 void scanner_thread_func(void *arg1, void *arg2, void *arg3) {
-    const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
+    const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
 
     /* Возвращаем команду на белую пульсацию! */
     uint8_t cmd_white_breathe[] = {
