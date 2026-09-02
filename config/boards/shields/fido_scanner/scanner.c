@@ -80,7 +80,6 @@ int scanner_start_enroll(uint16_t slot_id) {
         return -EINVAL;
     }
     atomic_set(&enroll_target_slot, (atomic_val_t)slot_id);
-    k_sem_give(&touch_sem);
     return 0;
 }
 
