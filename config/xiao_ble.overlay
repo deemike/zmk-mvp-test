@@ -22,18 +22,18 @@
         diode-direction = "col2row";
 
         col-gpios
-            = <&gpio0 2 GPIO_ACTIVE_HIGH>
-            , <&gpio0 3 GPIO_ACTIVE_HIGH>
+            = <&gpio0 2 GPIO_ACTIVE_HIGH>  /* Пин D0 */
+            , <&gpio0 3 GPIO_ACTIVE_HIGH>  /* Пин D1 */
             ;
 
         row-gpios
-            = <&gpio0 28 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-            , <&gpio0 29 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            = <&gpio0 28 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* Пин D2 */
+            , <&gpio0 29 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* Пин D3 */
             ;
     };
 };
 
-/* Включаем правильный аппаратный UART для пинов D6 и D7 */
+/* Включаем правильный аппаратный UART0 для пинов D6 и D7 */
 &uart0 {
     status = "okay";
     current-speed = <57600>;
