@@ -30,7 +30,7 @@ static uint16_t enrolled_templates_count = 0;
 
 /* Колбэк UART по прерываниям RX */
 static void uart_cb(const struct device *dev, void *user_data) {
-    uint8_t rx_buf[16];
+    uint8_t rx_buf[32];
     int recv_len;
 
     if (!uart_irq_update(dev)) {
@@ -42,16 +42,7 @@ static void uart_cb(const struct device *dev, void *user_data) {
         if (recv_len <= 0) {
             break;
         }
-
-        for (int i = 0; i < recv_len; i++) {
-            LOG_INF("UART RX RAW: 0x%02X", rx_buf[i]);
-            struct r502_ack_packet packet;
-            if (r502_parser_feed_byte(&parser, rx_buf[i], &packet)) {
-                LOG_INF("ACK RX: PID=0x%02X, Code=0x%02X, Len=%u",
-                        packet.pid, packet.confirmation_code, packet.length);
-                r502_driver_notify_ack(&packet);
-            }
-        }
+        r502_driver_feed_rx(rx_buf, recv_len);
     }
 }
 
@@ -241,14 +232,6 @@ static void do_verify_finger(void) {
 
     current_scanner_state = SCANNER_STATE_VERIFYING;
 
-    /* Сброс мусора из RX FIFO и сброс парсера */
-    uint8_t dummy[16];
-    while (uart_fifo_read(uart_dev, dummy, sizeof(dummy)) > 0) {}
-    r502_parser_init(&parser);
-
-    /* Индикация: быстрое синее мигание при начале сканирования */
-    r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 2);
-
     /* Захват изображения отпечатка (до 10 попыток по 100 мс = 1 секунда на прижатие) */
     for (int attempt = 0; attempt < 10; attempt++) {
         ret = r502_get_image(uart_dev);
@@ -260,6 +243,10 @@ static void do_verify_finger(void) {
 
     if (ret != R502_ACK_OK) {
         LOG_WRN("GetImage failed or no finger detected (code 0x%02X)", ret);
+        /* Ошибка считывания или палец убран -> Красный свет на 1.5 сек */
+        r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
+        k_msleep(1500);
+        wait_finger_release(2000);
         current_scanner_state = SCANNER_STATE_IDLE;
         return;
     }
@@ -268,8 +255,10 @@ static void do_verify_finger(void) {
     ret = r502_image_to_tz(uart_dev, 1);
     if (ret != R502_ACK_OK) {
         LOG_WRN("Img2Tz failed: 0x%02X", ret);
-        r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x15, R502_LED_COLOR_RED, 2);
-        k_msleep(1000);
+        /* Ошибка характеристик -> Красный свет на 1.5 сек */
+        r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
+        k_msleep(1500);
+        wait_finger_release(2000);
         current_scanner_state = SCANNER_STATE_IDLE;
         return;
     }
@@ -277,7 +266,7 @@ static void do_verify_finger(void) {
     /* Поиск по базе сохраненных отпечатков (слоты 0 - 100) */
     ret = r502_search(uart_dev, 1, 0, 100, &found_page, &score);
     if (ret == R502_ACK_OK) {
-        /* УСПЕХ: Отпечаток найден в базе */
+        /* УСПЕХ: Отпечаток найден в базе (Слот 0) -> Зеленый свет на 1.5 сек */
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_GREEN, 0);
         LOG_INF("=================================================");
         LOG_INF(">>> [ZMK_FIDO_AUTH] User verified! Slot: %u, Score: %u <<<", found_page, score);
@@ -285,7 +274,7 @@ static void do_verify_finger(void) {
         scanner_on_auth_event(true, found_page, score);
         k_msleep(1500);
     } else {
-        /* НЕУДАЧА: Отпечаток не распознан или не зарегистрирован */
+        /* НЕУДАЧА: Чужой / нераспознанный отпечаток -> Красный свет на 1.5 сек */
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         LOG_WRN("=================================================");
         LOG_WRN(">>> [ZMK_FIDO_AUTH] Verification failed (No match, code 0x%02X) <<<", ret);

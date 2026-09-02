@@ -1,23 +1,27 @@
 #include "r502_driver.h"
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/ring_buffer.h>
 #include <errno.h>
 
 LOG_MODULE_DECLARE(scanner_fido, LOG_LEVEL_DBG);
 
-static struct k_sem ack_sem;
+RING_BUF_DECLARE(driver_rx_ringbuf, 256);
 static struct k_mutex r502_lock;
-static struct r502_ack_packet last_ack;
 
 void r502_driver_init(void) {
-    k_sem_init(&ack_sem, 0, 1);
     k_mutex_init(&r502_lock);
+    ring_buf_reset(&driver_rx_ringbuf);
+}
+
+void r502_driver_feed_rx(const uint8_t *data, size_t len) {
+    if (data && len > 0) {
+        ring_buf_put(&driver_rx_ringbuf, data, len);
+    }
 }
 
 void r502_driver_notify_ack(const struct r502_ack_packet *packet) {
-    if (!packet) return;
-    last_ack = *packet;
-    k_sem_give(&ack_sem);
+    ARG_UNUSED(packet);
 }
 
 int r502_send_command(const struct device *uart_dev,
@@ -41,33 +45,53 @@ int r502_send_command(const struct device *uart_dev,
 
     k_mutex_lock(&r502_lock, K_FOREVER);
 
-    /* Сбрасываем старый семафор, если он был взведен */
-    k_sem_reset(&ack_sem);
+    /* Очищаем кольцевой буфер перед отправкой новой команды */
+    ring_buf_reset(&driver_rx_ringbuf);
 
     /* Отправка данных по UART */
     for (int i = 0; i < pkg_len; i++) {
         uart_poll_out(uart_dev, tx_buf[i]);
     }
 
-    /* Ожидание ответа с таймаутом */
-    int ret = k_sem_take(&ack_sem, timeout);
-    if (ret != 0) {
+    /* Ожидание и сборка полного ACK пакета из кольцевого буфера */
+    struct r502_parser local_parser;
+    r502_parser_init(&local_parser);
+    struct r502_ack_packet packet;
+    memset(&packet, 0, sizeof(packet));
+
+    int64_t deadline = k_uptime_get() + k_ticks_to_ms_floor64(timeout.ticks);
+    bool ack_received = false;
+
+    while (k_uptime_get() < deadline) {
+        uint8_t byte;
+        if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
+            LOG_INF("UART RX: 0x%02X", byte);
+            if (r502_parser_feed_byte(&local_parser, byte, &packet)) {
+                ack_received = true;
+                break;
+            }
+        } else {
+            k_msleep(2);
+        }
+    }
+
+    if (!ack_received) {
         LOG_WRN("Timeout waiting for ACK on cmd 0x%02X", cmd);
         k_mutex_unlock(&r502_lock);
         return -ETIMEDOUT;
     }
 
-    if (!last_ack.valid) {
+    if (!packet.valid) {
         LOG_ERR("Received invalid ACK packet (bad checksum)");
         k_mutex_unlock(&r502_lock);
         return -EIO;
     }
 
     if (out_ack) {
-        *out_ack = last_ack;
+        *out_ack = packet;
     }
 
-    int code = last_ack.confirmation_code;
+    int code = packet.confirmation_code;
     k_mutex_unlock(&r502_lock);
 
     return code;
