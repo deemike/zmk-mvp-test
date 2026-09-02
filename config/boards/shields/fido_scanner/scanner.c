@@ -240,16 +240,21 @@ static void do_verify_finger(void) {
 
     current_scanner_state = SCANNER_STATE_VERIFYING;
 
+    /* Сброс мусора из RX FIFO и сброс парсера */
+    uint8_t dummy[16];
+    while (uart_fifo_read(uart_dev, dummy, sizeof(dummy)) > 0) {}
+    r502_parser_init(&parser);
+
     /* Индикация: быстрое синее мигание при начале сканирования */
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 2);
 
-    /* Захват изображения отпечатка (до 3 попыток по 60 мс) */
-    for (int attempt = 0; attempt < 3; attempt++) {
+    /* Захват изображения отпечатка (до 10 попыток по 100 мс = 1 секунда на прижатие) */
+    for (int attempt = 0; attempt < 10; attempt++) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
             break;
         }
-        k_msleep(60);
+        k_msleep(100);
     }
 
     if (ret != R502_ACK_OK) {
@@ -323,15 +328,26 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
         LOG_WRN("Touch GPIO device not ready");
     }
 
-    /* Пауза для стабилизации питания сенсора и USB-консоли */
-    LOG_INF("Waiting for R502-F sensor boot (3s)...");
-    k_msleep(3000);
+    /* Полная пауза 5.5 сек: даем сенсору R502-F завершить калибровку емкостного датчика и запуск MCU */
+    LOG_INF("Waiting for R502-F sensor boot and calibration (5.5s)...");
+    k_msleep(5500);
 
     int pin_lvl = -1;
     if (touch_dev && device_is_ready(touch_dev)) {
         pin_lvl = gpio_pin_get(touch_dev, TOUCH_PIN);
     }
     LOG_INF("Initial Touch GPIO level at boot: %d", pin_lvl);
+
+    /* Первоначальный запуск белой пульсации */
+    uint8_t cmd_white_breathe[] = {
+        0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
+        0x01, 0x00, 0x07,
+        0x35, 0x01, 0xFF, 0x07, 0x00,
+        0x01, 0x44
+    };
+    for (size_t i = 0; i < sizeof(cmd_white_breathe); i++) {
+        uart_poll_out(uart_dev, cmd_white_breathe[i]);
+    }
 
     LOG_INF("Dixo Keyboard biometric scanner ready!");
 
@@ -369,16 +385,10 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             LOG_INF("Finger lifted from sensor");
         }
 
-        /* Каждые 2 секунды (20 тиков по 100 мс) в покое шлем сиреневую пульсацию */
+        /* Каждые 2 секунды (20 тиков по 100 мс) в покое шлем белую пульсацию */
         if (!last_touch && (idle_ticks % 20 == 0)) {
-            uint8_t cmd_purple_breathe[] = {
-                0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-                0x01, 0x00, 0x07,
-                0x35, 0x01, 0xFF, 0x03, 0x00,
-                0x01, 0x40
-            };
-            for (size_t i = 0; i < sizeof(cmd_purple_breathe); i++) {
-                uart_poll_out(uart_dev, cmd_purple_breathe[i]);
+            for (size_t i = 0; i < sizeof(cmd_white_breathe); i++) {
+                uart_poll_out(uart_dev, cmd_white_breathe[i]);
             }
         }
 
