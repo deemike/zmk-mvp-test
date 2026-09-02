@@ -44,6 +44,7 @@ static void uart_cb(const struct device *dev, void *user_data) {
         }
 
         for (int i = 0; i < recv_len; i++) {
+            LOG_INF("UART RX RAW: 0x%02X", rx_buf[i]);
             struct r502_ack_packet packet;
             if (r502_parser_feed_byte(&parser, rx_buf[i], &packet)) {
                 LOG_INF("ACK RX: PID=0x%02X, Code=0x%02X, Len=%u",
@@ -387,6 +388,7 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
 
         /* Каждые 2 секунды (20 тиков по 100 мс) в покое шлем белую пульсацию */
         if (!last_touch && (idle_ticks % 20 == 0)) {
+            LOG_INF("Sending white breathe command to UART0...");
             for (size_t i = 0; i < sizeof(cmd_white_breathe); i++) {
                 uart_poll_out(uart_dev, cmd_white_breathe[i]);
             }
