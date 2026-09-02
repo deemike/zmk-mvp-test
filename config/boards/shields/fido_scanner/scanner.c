@@ -240,10 +240,20 @@ static void do_verify_finger(void) {
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 2);
     k_msleep(60);
 
-    /* Захват изображения отпечатка */
-    ret = r502_get_image(uart_dev);
+    /* Захват изображения отпечатка с ожиданием контакта (до 1.5 сек) */
+    uint32_t wait_ms = 0;
+    while (wait_ms < 1500) {
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_OK) {
+            break;
+        }
+        k_msleep(50);
+        wait_ms += 50;
+    }
+
     if (ret != R502_ACK_OK) {
-        LOG_DBG("GetImage: no finger or capture error (0x%02X)", ret);
+        LOG_DBG("GetImage: no finger captured (0x%02X)", ret);
+        r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0x15, R502_LED_COLOR_BLUE, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return;
     }
@@ -318,6 +328,9 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     LOG_INF("Waiting for R502-F sensor boot (3s)...");
     k_msleep(3000);
 
+    /* Сбрасываем ложные прерывания, возникшие при переходных процессах подачи питания */
+    k_sem_reset(&touch_sem);
+
     /* Проверка подключения сканера и количества сохраненных шаблонов */
     uint16_t tmpl_count = 0;
     int ret = r502_get_template_count(uart_dev, &tmpl_count);
@@ -347,7 +360,16 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
         if (sem_res == 0 || is_finger_present()) {
             LOG_INF("Touch event detected! Starting processing...");
 
-            /* Если в базе еще нет ни одного пальца — первый контакт автоматически запускает регистрацию Слота 0 */
+            /* Если количество шаблонов еще неизвестно (было 0 из-за таймаута при старте), перепроверяем у сенсора */
+            if (enrolled_templates_count == 0) {
+                uint16_t count = 0;
+                if (r502_get_template_count(uart_dev, &count) == R502_ACK_OK) {
+                    enrolled_templates_count = count;
+                    LOG_INF("Refreshed enrolled templates from sensor: %u", enrolled_templates_count);
+                }
+            }
+
+            /* Если в базе действительно нет ни одного пальца — запускаем регистрацию Слота 0 */
             if (enrolled_templates_count == 0) {
                 LOG_INF("No fingerprints in database! Automatically enrolling Master Finger (Slot 0)...");
                 do_enroll_finger(0);
