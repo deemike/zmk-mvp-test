@@ -283,8 +283,9 @@ static void do_verify_finger(void) {
         k_msleep(1500);
     }
 
-    /* Ожидание снятия пальца */
+    /* Ожидание снятия пальца и выключение подсветки */
     wait_finger_release(2000);
+    r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
 }
 
@@ -328,20 +329,11 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     }
     LOG_INF("Initial Touch GPIO level at boot: %d", pin_lvl);
 
-    /* Первоначальный запуск белой пульсации */
-    uint8_t cmd_white_breathe[] = {
-        0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-        0x01, 0x00, 0x07,
-        0x35, 0x01, 0xFF, 0x07, 0x00,
-        0x01, 0x44
-    };
-    for (size_t i = 0; i < sizeof(cmd_white_breathe); i++) {
-        uart_poll_out(uart_dev, cmd_white_breathe[i]);
-    }
+    /* В покое кольцо выключено для экономии аккумулятора */
+    r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
 
-    LOG_INF("Dixo Keyboard biometric scanner ready!");
+    LOG_INF("Dixo Keyboard biometric scanner ready (Standby, LED OFF)!");
 
-    uint32_t idle_ticks = 0;
     bool last_touch = false;
 
     while (1) {
@@ -367,7 +359,6 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
                 last_touch = true;
                 LOG_INF("Touch detected on Pin D5! Starting verification...");
                 do_verify_finger();
-                idle_ticks = 0;
             }
         } else if (!is_touched && last_touch) {
             /* Палец убран с датчика */
@@ -375,15 +366,6 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             LOG_INF("Finger lifted from sensor");
         }
 
-        /* Каждые 2 секунды (20 тиков по 100 мс) в покое шлем белую пульсацию */
-        if (!last_touch && (idle_ticks % 20 == 0)) {
-            LOG_INF("Sending white breathe command to UART0...");
-            for (size_t i = 0; i < sizeof(cmd_white_breathe); i++) {
-                uart_poll_out(uart_dev, cmd_white_breathe[i]);
-            }
-        }
-
-        idle_ticks++;
         k_msleep(100);
     }
 }
