@@ -232,11 +232,17 @@ static void do_verify_finger(void) {
 
     current_scanner_state = SCANNER_STATE_VERIFYING;
 
-    /* Захват изображения отпечатка (до 10 попыток по 100 мс = 1 секунда на прижатие) */
-    for (int attempt = 0; attempt < 10; attempt++) {
+    /* Захват изображения отпечатка (до 15 попыток: даем пользователю плотно прижать палец) */
+    for (int attempt = 0; attempt < 15; attempt++) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
+            LOG_INF("Fingerprint image captured successfully!");
             break;
+        }
+        if (ret == R502_ACK_NO_FINGER) {
+            /* Палец еще не полностью на стекле - ждем 100 мс и повторяем */
+            k_msleep(100);
+            continue;
         }
         k_msleep(100);
     }
@@ -247,6 +253,7 @@ static void do_verify_finger(void) {
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         k_msleep(1500);
         wait_finger_release(2000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return;
     }

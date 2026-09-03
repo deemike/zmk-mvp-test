@@ -34,6 +34,11 @@ bool r502_parser_feed_byte(struct r502_parser *parser, uint8_t byte, struct r502
         break;
 
     case R502_PARSE_PID:
+        if (byte != R502_PID_ACK && byte != R502_PID_DATA && byte != R502_PID_END) {
+            /* Отбрасываем эхо исходящих команд (PID 0x01) и мусор */
+            parser->state = R502_PARSE_HEADER1;
+            break;
+        }
         parser->current_packet.pid = byte;
         parser->calc_sum = byte;
         parser->state = R502_PARSE_LEN_H;

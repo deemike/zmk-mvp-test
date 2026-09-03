@@ -67,8 +67,10 @@ int r502_send_command(const struct device *uart_dev,
         if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
             LOG_INF("UART RX: 0x%02X", byte);
             if (r502_parser_feed_byte(&local_parser, byte, &packet)) {
-                ack_received = true;
-                break;
+                if (packet.pid == R502_PID_ACK) {
+                    ack_received = true;
+                    break;
+                }
             }
         } else {
             k_msleep(2);
@@ -103,11 +105,11 @@ int r502_set_led(const struct device *uart_dev,
                  uint8_t color,
                  uint8_t count) {
     uint8_t params[4] = { mode, speed, color, count };
-    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, K_MSEC(400));
+    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, K_MSEC(800));
 }
 
 int r502_get_image(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, K_MSEC(400));
+    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, K_MSEC(1000));
 }
 
 int r502_image_to_tz(const struct device *uart_dev, uint8_t buffer_id) {
