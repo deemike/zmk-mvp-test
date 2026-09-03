@@ -335,6 +335,7 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     LOG_INF("Dixo Keyboard biometric scanner ready (Standby, LED OFF)!");
 
     bool last_touch = false;
+    uint32_t idle_ticks = 0;
 
     while (1) {
         /* Проверяем, поступил ли запрос на регистрацию отпечатка */
@@ -359,6 +360,7 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
                 last_touch = true;
                 LOG_INF("Touch detected on Pin D5! Starting verification...");
                 do_verify_finger();
+                idle_ticks = 0;
             }
         } else if (!is_touched && last_touch) {
             /* Палец убран с датчика */
@@ -366,6 +368,12 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             LOG_INF("Finger lifted from sensor");
         }
 
+        /* Каждые 3 секунды выводим живой статус пина D5 в консоль */
+        if (!last_touch && (idle_ticks % 30 == 0)) {
+            LOG_INF("Heartbeat: Standby. Pin D5 level = %d", raw_pin);
+        }
+
+        idle_ticks++;
         k_msleep(100);
     }
 }
