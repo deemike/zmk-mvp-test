@@ -232,6 +232,9 @@ static void do_verify_finger(void) {
 
     current_scanner_state = SCANNER_STATE_VERIFYING;
 
+    /* Мгновенная визуальная индикация: палец обнаружен, идет сканирование */
+    r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 1);
+
     /* Захват изображения отпечатка (до 15 попыток: даем пользователю плотно прижать палец) */
     for (int attempt = 0; attempt < 15; attempt++) {
         ret = r502_get_image(uart_dev);
@@ -336,10 +339,8 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     }
     LOG_INF("Initial Touch GPIO level at boot: %d", pin_lvl);
 
-    /* В покое кольцо выключено для экономии аккумулятора */
-    r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
-
-    LOG_INF("Dixo Keyboard biometric scanner ready (Standby, LED OFF)!");
+    /* Сенсор R502-F по умолчанию запускается с выключенной подсветкой */
+    LOG_INF("Dixo Keyboard biometric scanner ready (Standby)!");
 
     bool last_touch = false;
     uint32_t idle_ticks = 0;
@@ -368,11 +369,24 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
                 LOG_INF("Touch detected on Pin D5! Starting verification...");
                 do_verify_finger();
                 idle_ticks = 0;
+                continue;
             }
         } else if (!is_touched && last_touch) {
             /* Палец убран с датчика */
             last_touch = false;
             LOG_INF("Finger lifted from sensor");
+        }
+
+        /* Резервное обнаружение: если пин D5 не сработал, каждые 1.5 сек опрашиваем стекло сенсора */
+        if (!last_touch && (idle_ticks > 0) && (idle_ticks % 15 == 0)) {
+            int test_img = r502_get_image(uart_dev);
+            if (test_img == R502_ACK_OK) {
+                LOG_INF("Finger detected via optical sensor! Starting verification...");
+                last_touch = true;
+                do_verify_finger();
+                idle_ticks = 0;
+                continue;
+            }
         }
 
         /* Каждые 3 секунды выводим живой статус пина D5 в консоль */
