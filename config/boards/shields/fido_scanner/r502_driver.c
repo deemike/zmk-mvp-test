@@ -29,7 +29,7 @@ int r502_send_command(const struct device *uart_dev,
                       const uint8_t *params,
                       size_t param_len,
                       struct r502_ack_packet *out_ack,
-                      k_timeout_t timeout) {
+                      uint32_t timeout_ms) {
     uint8_t tx_buf[64];
 
     if (!uart_dev || !device_is_ready(uart_dev)) {
@@ -59,7 +59,7 @@ int r502_send_command(const struct device *uart_dev,
     struct r502_ack_packet packet;
     memset(&packet, 0, sizeof(packet));
 
-    int64_t deadline = k_uptime_get() + k_ticks_to_ms_floor64(timeout.ticks);
+    int64_t deadline = k_uptime_get() + (int64_t)timeout_ms;
     bool ack_received = false;
 
     while (k_uptime_get() < deadline) {
@@ -105,16 +105,16 @@ int r502_set_led(const struct device *uart_dev,
                  uint8_t color,
                  uint8_t count) {
     uint8_t params[4] = { mode, speed, color, count };
-    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, K_MSEC(800));
+    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, 800);
 }
 
 int r502_get_image(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, K_MSEC(1000));
+    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 1500);
 }
 
 int r502_image_to_tz(const struct device *uart_dev, uint8_t buffer_id) {
     uint8_t param = buffer_id;
-    return r502_send_command(uart_dev, R502_CMD_IMAGE_TO_TZ, &param, 1, NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_IMAGE_TO_TZ, &param, 1, NULL, 1000);
 }
 
 int r502_search(const struct device *uart_dev,
@@ -131,7 +131,7 @@ int r502_search(const struct device *uart_dev,
         (uint8_t)(page_num & 0xFF)
     };
     struct r502_ack_packet ack;
-    int ret = r502_send_command(uart_dev, R502_CMD_SEARCH, params, sizeof(params), &ack, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    int ret = r502_send_command(uart_dev, R502_CMD_SEARCH, params, sizeof(params), &ack, 1000);
     if (ret == R502_ACK_OK && ack.data_len >= 4) {
         if (found_page) {
             *found_page = (((uint16_t)ack.data[0]) << 8) | ack.data[1];
@@ -144,7 +144,7 @@ int r502_search(const struct device *uart_dev,
 }
 
 int r502_reg_model(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_REG_MODEL, NULL, 0, NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_REG_MODEL, NULL, 0, NULL, 1000);
 }
 
 int r502_store_char(const struct device *uart_dev, uint8_t buffer_id, uint16_t page_id) {
@@ -153,7 +153,7 @@ int r502_store_char(const struct device *uart_dev, uint8_t buffer_id, uint16_t p
         (uint8_t)(page_id >> 8),
         (uint8_t)(page_id & 0xFF)
     };
-    return r502_send_command(uart_dev, R502_CMD_STORE_CHAR, params, sizeof(params), NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_STORE_CHAR, params, sizeof(params), NULL, 1000);
 }
 
 int r502_delete_char(const struct device *uart_dev, uint16_t page_id, uint16_t count) {
@@ -163,16 +163,16 @@ int r502_delete_char(const struct device *uart_dev, uint16_t page_id, uint16_t c
         (uint8_t)(count >> 8),
         (uint8_t)(count & 0xFF)
     };
-    return r502_send_command(uart_dev, R502_CMD_DELETE_CHAR, params, sizeof(params), NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_DELETE_CHAR, params, sizeof(params), NULL, 1000);
 }
 
 int r502_empty(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_EMPTY, NULL, 0, NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_EMPTY, NULL, 0, NULL, 1500);
 }
 
 int r502_get_template_count(const struct device *uart_dev, uint16_t *count) {
     struct r502_ack_packet ack;
-    int ret = r502_send_command(uart_dev, R502_CMD_TEMPLATE_COUNT, NULL, 0, &ack, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    int ret = r502_send_command(uart_dev, R502_CMD_TEMPLATE_COUNT, NULL, 0, &ack, 1000);
     if (ret == R502_ACK_OK && ack.data_len >= 2) {
         if (count) {
             *count = (((uint16_t)ack.data[0]) << 8) | ack.data[1];
@@ -182,5 +182,5 @@ int r502_get_template_count(const struct device *uart_dev, uint16_t *count) {
 }
 
 int r502_handshake(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_HANDSHAKE, NULL, 0, NULL, K_MSEC(R502_DEFAULT_TIMEOUT_MS));
+    return r502_send_command(uart_dev, R502_CMD_HANDSHAKE, NULL, 0, NULL, 1000);
 }

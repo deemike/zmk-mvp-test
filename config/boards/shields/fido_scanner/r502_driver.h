@@ -24,7 +24,7 @@ int r502_send_command(const struct device *uart_dev,
                       const uint8_t *params,
                       size_t param_len,
                       struct r502_ack_packet *out_ack,
-                      k_timeout_t timeout);
+                      uint32_t timeout_ms);
 
 /* Управление круговой подсветкой (Aura LED) */
 int r502_set_led(const struct device *uart_dev,
