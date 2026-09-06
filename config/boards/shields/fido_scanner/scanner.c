@@ -100,36 +100,50 @@ static int do_enroll_finger(uint16_t slot_id) {
     int ret;
     current_scanner_state = SCANNER_STATE_ENROLLING;
 
+    LOG_INF("=================================================");
     LOG_INF(">>> ENROLLMENT MODE: Preparing to enroll Finger into Slot %u <<<", slot_id);
+    LOG_INF("=================================================");
 
     /* Шаг 1: Индикация фиолетовым дыханием, ожидание 1-го касания */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0x15, R502_LED_COLOR_PURPLE, 0);
-    LOG_INF("Step 1/2: Place finger on sensor...");
+    LOG_INF("Step 1/2: Please touch and hold your finger on the sensor...");
 
-    /* Ждем касания (таймаут 10 секунд или 3 ошибки связи) */
+    /* Ждем, пока палец прикоснется к датчику (по пину D5, таймаут 20 секунд) */
     uint32_t wait_ms = 0;
-    int timeout_count = 0;
-    while (wait_ms < 10000) {
+    while (!is_finger_present() && wait_ms < 20000) {
+        k_msleep(50);
+        wait_ms += 50;
+    }
+
+    if (!is_finger_present()) {
+        LOG_WRN("Enrollment timeout: No finger placed on sensor");
+        r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_RED, 2);
+        k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+        current_scanner_state = SCANNER_STATE_IDLE;
+        return -ETIMEDOUT;
+    }
+
+    /* Небольшая пауза 150 мс для полного прилегания пальца к стеклу */
+    k_msleep(150);
+
+    /* Считывание кадра 1 */
+    ret = -1;
+    for (int i = 0; i < 5; i++) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
             break;
-        } else if (ret < 0) {
-            timeout_count++;
-            if (timeout_count >= 3) {
-                LOG_WRN("UART timeout: sensor not responding");
-                break;
-            }
         }
         k_msleep(100);
-        wait_ms += 100;
     }
 
     if (ret != R502_ACK_OK) {
-        LOG_WRN("Enrollment timeout: Finger not detected");
+        LOG_WRN("Enrollment Step 1: Failed to capture image (0x%02X)", ret);
         r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_RED, 2);
         k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
-        return -ETIMEDOUT;
+        return -EIO;
     }
 
     /* Преобразование 1-го снимка в характеристики CharBuffer1 */
@@ -138,6 +152,7 @@ static int do_enroll_finger(uint16_t slot_id) {
         LOG_ERR("Img2Tz (Buffer 1) failed: 0x%02X", ret);
         r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_RED, 2);
         k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return ret;
     }
@@ -148,12 +163,8 @@ static int do_enroll_finger(uint16_t slot_id) {
     k_msleep(500);
 
     /* Ждем, пока палец снимут */
-    while (1) {
-        ret = r502_get_image(uart_dev);
-        if (ret == R502_ACK_NO_FINGER || !is_finger_present() || ret < 0) {
-            break;
-        }
-        k_msleep(100);
+    while (is_finger_present()) {
+        k_msleep(50);
     }
 
     /* Шаг 2: Индикация фиолетовым миганием, ожидание 2-го касания */
@@ -161,28 +172,39 @@ static int do_enroll_finger(uint16_t slot_id) {
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x15, R502_LED_COLOR_PURPLE, 0);
 
     wait_ms = 0;
-    timeout_count = 0;
-    while (wait_ms < 10000) {
-        ret = r502_get_image(uart_dev);
-        if (ret == R502_ACK_OK) {
-            break;
-        } else if (ret < 0) {
-            timeout_count++;
-            if (timeout_count >= 3) {
-                LOG_WRN("UART timeout on step 2: sensor not responding");
-                break;
-            }
-        }
-        k_msleep(100);
-        wait_ms += 100;
+    while (!is_finger_present() && wait_ms < 20000) {
+        k_msleep(50);
+        wait_ms += 50;
     }
 
-    if (ret != R502_ACK_OK) {
+    if (!is_finger_present()) {
         LOG_WRN("Enrollment timeout on step 2");
         r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_RED, 2);
         k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return -ETIMEDOUT;
+    }
+
+    k_msleep(150);
+
+    /* Считывание кадра 2 */
+    ret = -1;
+    for (int i = 0; i < 5; i++) {
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_OK) {
+            break;
+        }
+        k_msleep(100);
+    }
+
+    if (ret != R502_ACK_OK) {
+        LOG_WRN("Enrollment Step 2: Failed to capture image (0x%02X)", ret);
+        r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_RED, 2);
+        k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+        current_scanner_state = SCANNER_STATE_IDLE;
+        return -EIO;
     }
 
     /* Преобразование 2-го снимка в CharBuffer2 */
@@ -191,6 +213,7 @@ static int do_enroll_finger(uint16_t slot_id) {
         LOG_ERR("Img2Tz (Buffer 2) failed: 0x%02X", ret);
         r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_RED, 2);
         k_msleep(1000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return ret;
     }
@@ -202,6 +225,7 @@ static int do_enroll_finger(uint16_t slot_id) {
         LOG_ERR("RegModel failed (prints do not match): 0x%02X", ret);
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         k_msleep(2000);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
         current_scanner_state = SCANNER_STATE_IDLE;
         return ret;
     }
@@ -211,11 +235,11 @@ static int do_enroll_finger(uint16_t slot_id) {
     ret = r502_store_char(uart_dev, 1, slot_id);
     if (ret == R502_ACK_OK) {
         LOG_INF("=================================================");
-        LOG_INF(">>> ENROLLMENT SUCCESSFUL! Stored in Slot %u <<<", slot_id);
+        LOG_INF(">>> ENROLLMENT SUCCESSFUL! Master finger stored in Slot %u <<<", slot_id);
         LOG_INF("=================================================");
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_GREEN, 0);
         enrolled_templates_count++;
-        k_msleep(2000);
+        k_msleep(2500);
     } else {
         LOG_ERR("StoreChar failed: 0x%02X", ret);
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
@@ -223,6 +247,7 @@ static int do_enroll_finger(uint16_t slot_id) {
     }
 
     wait_finger_release(2000);
+    r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
     return ret;
 }
@@ -246,17 +271,12 @@ static void do_verify_finger(void) {
         uart_poll_out(uart_dev, cmd_led_blue[i]);
     }
 
-    /* Захват изображения отпечатка (до 15 попыток: даем пользователю плотно прижать палец) */
-    for (int attempt = 0; attempt < 15; attempt++) {
+    /* Захват изображения отпечатка (быстрые 3 попытки по 100 мс) */
+    for (int attempt = 0; attempt < 3; attempt++) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
             LOG_INF("Fingerprint image captured successfully!");
             break;
-        }
-        if (ret == R502_ACK_NO_FINGER) {
-            /* Палец еще не полностью на стекле - ждем 100 мс и повторяем */
-            k_msleep(100);
-            continue;
         }
         k_msleep(100);
     }
@@ -350,8 +370,17 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     }
     LOG_INF("Initial Touch GPIO level at boot: %d", pin_lvl);
 
-    /* Сенсор R502-F по умолчанию запускается с выключенной подсветкой */
-    LOG_INF("Dixo Keyboard biometric scanner ready (Standby)!");
+    /* Очистка базы отпечатков в Flash памяти сканера по запросу пользователя */
+    LOG_INF("Clearing fingerprint library (PS_Empty)...");
+    r502_empty(uart_dev);
+    k_msleep(500);
+
+    /* Запуск первичной регистрации Master Finger (Слот 0) */
+    LOG_INF("Starting fresh enrollment of Master Finger into Slot 0...");
+    do_enroll_finger(0);
+
+    /* Сенсор R502-F переходит в покой с выключенной подсветкой */
+    LOG_INF("Dixo Keyboard biometric scanner ready (Standby, LED OFF)!");
 
     bool last_touch = false;
     uint32_t idle_ticks = 0;
