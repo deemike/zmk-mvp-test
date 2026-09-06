@@ -45,6 +45,9 @@ int r502_send_command(const struct device *uart_dev,
 
     k_mutex_lock(&r502_lock, K_FOREVER);
 
+    /* Сбрасываем старые байты из буфера перед отправкой нового запроса */
+    ring_buf_reset(&driver_rx_ringbuf);
+
     /* Отправка данных по UART */
     for (int i = 0; i < pkg_len; i++) {
         uart_poll_out(uart_dev, tx_buf[i]);
@@ -102,11 +105,18 @@ int r502_set_led(const struct device *uart_dev,
                  uint8_t color,
                  uint8_t count) {
     uint8_t params[4] = { mode, speed, color, count };
-    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), NULL, 800);
+    uint8_t tx_buf[32];
+    int len = r502_build_command(tx_buf, sizeof(tx_buf), R502_CMD_AURA_LED, params, sizeof(params));
+    if (len > 0 && uart_dev && device_is_ready(uart_dev)) {
+        for (int i = 0; i < len; i++) {
+            uart_poll_out(uart_dev, tx_buf[i]);
+        }
+    }
+    return 0;
 }
 
 int r502_get_image(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 1500);
+    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 500);
 }
 
 int r502_image_to_tz(const struct device *uart_dev, uint8_t buffer_id) {

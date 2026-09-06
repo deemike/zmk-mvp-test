@@ -37,6 +37,9 @@
 &uart0 {
     status = "okay";
     current-speed = <57600>;
+    pinctrl-0 = <&uart0_default>;
+    pinctrl-1 = <&uart0_sleep>;
+    pinctrl-names = "default", "sleep";
 };
 
 /* Отключаем I2C0, чтобы освободить пин D5 (P0.05) под Touch Sensing */
