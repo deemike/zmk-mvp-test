@@ -107,24 +107,23 @@ static int do_enroll_finger(uint16_t slot_id) {
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
     LOG_INF("Step 1/2: Please place and hold your finger firmly on the sensor...");
 
-    /* Пауза 250 мс для стабилизации прижатия пальца к стеклу сканера */
     k_msleep(250);
 
-    /* Ожидание и захват 1-го снимка (до 10 секунд) */
+    /* Ожидание и захват 1-го снимка (до 10 секунд).
+     * Опрашиваем сканер напрямую: когда палец плотно прижат, GetImage вернет R502_ACK_OK.
+     */
     uint32_t wait_ms = 0;
     bool image1_ok = false;
 
     while (wait_ms < 10000) {
-        if (is_finger_present()) {
-            ret = r502_get_image(uart_dev);
-            if (ret == R502_ACK_OK) {
-                LOG_INF("Step 1: Fingerprint image 1 captured successfully!");
-                image1_ok = true;
-                break;
-            }
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_OK) {
+            LOG_INF("Step 1: Fingerprint image 1 captured successfully!");
+            image1_ok = true;
+            break;
         }
-        k_msleep(200);
-        wait_ms += 200;
+        k_msleep(100);
+        wait_ms += 100;
     }
 
     if (!image1_ok) {
@@ -147,44 +146,39 @@ static int do_enroll_finger(uint16_t slot_id) {
         return ret;
     }
 
-    /* Сигнализируем успех 1-го считывания зеленым бликом */
+    /* Сигнализируем успех 1-го считывания: зеленый блик */
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x15, R502_LED_COLOR_GREEN, 1);
-    LOG_INF("Step 1 OK! Please LIFT your finger...");
+    LOG_INF("Step 1 OK! Please LIFT your finger from the sensor...");
 
-    /* Ждем, пока палец снимут */
-    while (is_finger_present()) {
-        k_msleep(80);
+    /* Ждем, пока пользователь снимет палец со сканера */
+    uint32_t release_wait = 0;
+    while (release_wait < 6000) {
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_NO_FINGER) {
+            LOG_INF("Finger lifted!");
+            break;
+        }
+        k_msleep(100);
+        release_wait += 100;
     }
-    k_msleep(500);
+    k_msleep(400);
 
     /* Шаг 2: Индикация фиолетовым миганием, ожидание 2-го касания */
-    LOG_INF("Step 2/2: Place the SAME finger again...");
+    LOG_INF("Step 2/2: Place the SAME finger again firmly on the sensor...");
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x20, R502_LED_COLOR_PURPLE, 0);
-
-    /* Ждем повторного касания */
-    wait_ms = 0;
-    while (!is_finger_present() && wait_ms < 10000) {
-        k_msleep(100);
-        wait_ms += 100;
-    }
-
-    /* Пауза для стабилизации прижатия */
-    k_msleep(250);
 
     wait_ms = 0;
     bool image2_ok = false;
 
     while (wait_ms < 10000) {
-        if (is_finger_present()) {
-            ret = r502_get_image(uart_dev);
-            if (ret == R502_ACK_OK) {
-                LOG_INF("Step 2: Fingerprint image 2 captured successfully!");
-                image2_ok = true;
-                break;
-            }
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_OK) {
+            LOG_INF("Step 2: Fingerprint image 2 captured successfully!");
+            image2_ok = true;
+            break;
         }
-        k_msleep(200);
-        wait_ms += 200;
+        k_msleep(100);
+        wait_ms += 100;
     }
 
     if (!image2_ok) {
@@ -235,7 +229,15 @@ static int do_enroll_finger(uint16_t slot_id) {
         k_msleep(2000);
     }
 
-    wait_finger_release(1000);
+    /* Ждем, пока пользователь уберет палец после завершения */
+    release_wait = 0;
+    while (release_wait < 3000) {
+        if (r502_get_image(uart_dev) == R502_ACK_NO_FINGER) {
+            break;
+        }
+        k_msleep(100);
+        release_wait += 100;
+    }
     r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
     return ret;
@@ -252,23 +254,21 @@ static void do_verify_finger(void) {
     /* Мгновенная визуальная индикация: синий блик */
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 1);
 
-    /* Небольшая пауза 150 мс для полного прилегания пальца к сенсору */
-    k_msleep(150);
+    /* Небольшая пауза 100 мс */
+    k_msleep(100);
 
-    /* Захват изображения отпечатка (до 1.5 сек пока палец прижат) */
+    /* Захват изображения отпечатка (до 2.5 секунд пока палец прижимают) */
     uint32_t wait_ms = 0;
     bool image_ok = false;
-    while (wait_ms < 1500) {
-        if (is_finger_present()) {
-            ret = r502_get_image(uart_dev);
-            if (ret == R502_ACK_OK) {
-                LOG_INF("Fingerprint image captured successfully!");
-                image_ok = true;
-                break;
-            }
+    while (wait_ms < 2500) {
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_OK) {
+            LOG_INF("Fingerprint image captured successfully!");
+            image_ok = true;
+            break;
         }
-        k_msleep(100);
-        wait_ms += 100;
+        k_msleep(60);
+        wait_ms += 60;
     }
 
     if (!image_ok) {
@@ -312,6 +312,16 @@ static void do_verify_finger(void) {
         k_msleep(1500);
     }
 
+    /* Ждем, пока пользователь уберет палец со сканера */
+    uint32_t wait_lift = 0;
+    while (wait_lift < 2000) {
+        if (r502_get_image(uart_dev) == R502_ACK_NO_FINGER) {
+            break;
+        }
+        k_msleep(80);
+        wait_lift += 80;
+    }
+
     /* Выключение подсветки */
     r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
@@ -347,18 +357,18 @@ static void apply_uart_hw_config(uint32_t tx_pin, uint32_t rx_pin, nrf_uarte_bau
 
 static bool probe_scanner_connection(const struct device *dev) {
     static const struct probe_cfg configs[] = {
+        { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
+          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_57600, 57600 },
         { "Xiao D7 (P1.12)=TX -> Sensor RX (Brown), Xiao D6 (P1.11)=RX <- Sensor TX (Yellow)",
           NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_57600, 57600 },
         { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
-          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_57600, 57600 },
+          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_115200, 115200 },
         { "Xiao D7 (P1.12)=TX -> Sensor RX, Xiao D6 (P1.11)=RX <- Sensor TX",
           NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_115200, 115200 },
         { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
-          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_115200, 115200 },
+          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_9600, 9600 },
         { "Xiao D7 (P1.12)=TX -> Sensor RX, Xiao D6 (P1.11)=RX <- Sensor TX",
           NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_9600, 9600 },
-        { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
-          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_9600, 9600 },
     };
 
     LOG_INF("=================================================");
@@ -407,9 +417,9 @@ static bool probe_scanner_connection(const struct device *dev) {
 
     LOG_WRN("=================================================");
     LOG_WRN(">>> [PROBE FAILED] Sensor did not answer any UART permutation! <<<");
-    LOG_WRN(">>> Reverting to default (Xiao D7=TX, D6=RX @ 57600 baud) <<<");
+    LOG_WRN(">>> Reverting to default (Xiao D6=TX, D7=RX @ 57600 baud) <<<");
     LOG_WRN("=================================================");
-    apply_uart_hw_config(NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_57600);
+    apply_uart_hw_config(NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_57600);
     return false;
 }
 
