@@ -47,13 +47,17 @@ int r502_send_command(const struct device *uart_dev,
 
     /* Сбрасываем старые байты из буфера перед отправкой нового запроса */
     ring_buf_reset(&driver_rx_ringbuf);
+    uint8_t dummy;
+    while (uart_poll_in(uart_dev, &dummy) == 0) {
+        /* сброс мусора */
+    }
 
     /* Отправка данных по UART */
     for (int i = 0; i < pkg_len; i++) {
         uart_poll_out(uart_dev, tx_buf[i]);
     }
 
-    /* Ожидание и сборка полного ACK пакета из кольцевого буфера */
+    /* Ожидание и сборка полного ACK пакета */
     struct r502_parser local_parser;
     r502_parser_init(&local_parser);
     struct r502_ack_packet packet;
@@ -64,7 +68,15 @@ int r502_send_command(const struct device *uart_dev,
 
     while (k_uptime_get() < deadline) {
         uint8_t byte;
-        if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
+        bool got_byte = false;
+
+        if (uart_poll_in(uart_dev, &byte) == 0) {
+            got_byte = true;
+        } else if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
+            got_byte = true;
+        }
+
+        if (got_byte) {
             LOG_INF("UART RX: 0x%02X", byte);
             if (r502_parser_feed_byte(&local_parser, byte, &packet)) {
                 if (packet.pid == R502_PID_ACK) {
@@ -73,7 +85,7 @@ int r502_send_command(const struct device *uart_dev,
                 }
             }
         } else {
-            k_msleep(2);
+            k_busy_wait(50);
         }
     }
 
@@ -116,7 +128,7 @@ int r502_set_led(const struct device *uart_dev,
 }
 
 int r502_get_image(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 500);
+    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 800);
 }
 
 int r502_image_to_tz(const struct device *uart_dev, uint8_t buffer_id) {
