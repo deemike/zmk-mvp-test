@@ -65,7 +65,6 @@ int r502_send_command(const struct device *uart_dev,
     while (k_uptime_get() < deadline) {
         uint8_t byte;
         if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
-            LOG_DBG("UART RX: 0x%02X", byte);
             if (r502_parser_feed_byte(&local_parser, byte, &packet)) {
                 if (packet.pid == R502_PID_ACK) {
                     LOG_DBG("R502 ACK received: CMD=0x%02X, Code=0x%02X", cmd, packet.confirmation_code);
