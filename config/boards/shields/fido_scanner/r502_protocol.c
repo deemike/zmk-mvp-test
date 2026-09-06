@@ -34,7 +34,7 @@ bool r502_parser_feed_byte(struct r502_parser *parser, uint8_t byte, struct r502
         break;
 
     case R502_PARSE_PID:
-        if (byte != R502_PID_ACK && byte != R502_PID_DATA && byte != R502_PID_END) {
+        if (byte != R502_PID_ACK && byte != R502_PID_DATA && byte != R502_PID_END_DATA) {
             /* Отбрасываем эхо исходящих команд (PID 0x01) и мусор */
             parser->state = R502_PARSE_HEADER1;
             break;
