@@ -79,7 +79,7 @@ enum scanner_state scanner_get_state(void) {
     return current_scanner_state;
 }
 
-/* Обработчик событий биометрической верификации (Вариант А: USB лог / статус) */
+/* Обработчик событий биометрической верификации */
 void scanner_on_auth_event(bool success, uint16_t slot_id, uint16_t score) {
     if (success) {
         LOG_INF("=================================================");
@@ -101,11 +101,14 @@ static int do_enroll_finger(uint16_t slot_id) {
     LOG_INF(">>> ENROLLMENT MODE: Preparing to enroll Finger into Slot %u <<<", slot_id);
     LOG_INF("=================================================");
 
-    /* Шаг 1: Индикация фиолетовым дыханием, ожидание 1-го касания */
+    /* Шаг 1: Индикация фиолетовым дыханием */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
-    LOG_INF("Step 1/2: Please place and hold your finger on the sensor...");
+    LOG_INF("Step 1/2: Please place and hold your finger firmly on the sensor...");
 
-    /* Ждем, пока палец прикоснется к датчику и снимок успешно захватится (до 10 секунд) */
+    /* Пауза 250 мс для стабилизации прижатия пальца к стеклу сканера */
+    k_msleep(250);
+
+    /* Ожидание и захват 1-го снимка (до 10 секунд) */
     uint32_t wait_ms = 0;
     bool image1_ok = false;
 
@@ -118,8 +121,8 @@ static int do_enroll_finger(uint16_t slot_id) {
                 break;
             }
         }
-        k_msleep(150);
-        wait_ms += 150;
+        k_msleep(200);
+        wait_ms += 200;
     }
 
     if (!image1_ok) {
@@ -150,11 +153,21 @@ static int do_enroll_finger(uint16_t slot_id) {
     while (is_finger_present()) {
         k_msleep(80);
     }
-    k_msleep(400);
+    k_msleep(500);
 
     /* Шаг 2: Индикация фиолетовым миганием, ожидание 2-го касания */
     LOG_INF("Step 2/2: Place the SAME finger again...");
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x20, R502_LED_COLOR_PURPLE, 0);
+
+    /* Ждем повторного касания */
+    wait_ms = 0;
+    while (!is_finger_present() && wait_ms < 10000) {
+        k_msleep(100);
+        wait_ms += 100;
+    }
+
+    /* Пауза для стабилизации прижатия */
+    k_msleep(250);
 
     wait_ms = 0;
     bool image2_ok = false;
@@ -168,8 +181,8 @@ static int do_enroll_finger(uint16_t slot_id) {
                 break;
             }
         }
-        k_msleep(150);
-        wait_ms += 150;
+        k_msleep(200);
+        wait_ms += 200;
     }
 
     if (!image2_ok) {
@@ -234,8 +247,11 @@ static void do_verify_finger(void) {
 
     current_scanner_state = SCANNER_STATE_VERIFYING;
 
-    /* Мгновенная визуальная индикация: быстрый синий блик */
+    /* Мгновенная визуальная индикация: синий блик */
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 1);
+
+    /* Небольшая пауза 150 мс для полного прилегания пальца к сенсору */
+    k_msleep(150);
 
     /* Захват изображения отпечатка (до 1.5 сек пока палец прижат) */
     uint32_t wait_ms = 0;
@@ -249,8 +265,8 @@ static void do_verify_finger(void) {
                 break;
             }
         }
-        k_msleep(80);
-        wait_ms += 80;
+        k_msleep(100);
+        wait_ms += 100;
     }
 
     if (!image_ok) {
@@ -301,11 +317,11 @@ static void do_verify_finger(void) {
 
 /* Главный поток управления сканером */
 static void scanner_thread_func(void *p1, void *p2, void *p3) {
-    uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
+    uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
     touch_dev = DEVICE_DT_GET(TOUCH_GPIO_NODE);
 
     if (!device_is_ready(uart_dev)) {
-        LOG_ERR("UART0 device is not ready!");
+        LOG_ERR("UART1 device is not ready!");
         return;
     }
 
@@ -329,23 +345,41 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
         LOG_WRN("Touch GPIO device not ready");
     }
 
-    /* Короткая пауза 500 мс: завершение калибровки сенсора при подаче питания */
-    LOG_INF("Waiting for R502-F sensor boot (500ms)...");
-    k_msleep(500);
+    /* Пауза 1000 мс: даем сенсору R502-F завершить калибровку емкостного датчика при подаче питания */
+    LOG_INF("Waiting for R502-F sensor boot and calibration (1000ms)...");
+    k_msleep(1000);
 
-    /* Запрос количества зарегистрированных шаблонов (проверка связи) */
+    /* Проверка физической связи со сканером: включаем сиреневую пульсацию (Aura LED Purple Breathing) */
+    LOG_INF("Sending wake-up LED command (Purple Breathe) to R502-F on UART1...");
+    int led_ret = r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
+    if (led_ret == R502_ACK_OK) {
+        LOG_INF("=================================================");
+        LOG_INF(">>> R502-F Aura LED activated! Communication OK <<<");
+        LOG_INF("=================================================");
+    } else {
+        LOG_WRN("=================================================");
+        LOG_WRN(">>> WARNING: No ACK from R502-F on UART1 (code %d) <<<", led_ret);
+        LOG_WRN(">>> Verify wiring: D6 (Xiao TX) -> Sensor RX (White/Brown) <<<");
+        LOG_WRN(">>>                D7 (Xiao RX) -> Sensor TX (Yellow)      <<<");
+        LOG_WRN(">>>                VCC Pin 1 (Red) -> 3.3V (Sensor power)   <<<");
+        LOG_WRN("=================================================");
+    }
+
+    /* Запрос количества зарегистрированных шаблонов в Flash памяти сканера */
     uint16_t t_count = 0;
     int count_ret = r502_get_template_count(uart_dev, &t_count);
     if (count_ret == R502_ACK_OK) {
         enrolled_templates_count = t_count;
         LOG_INF("R502-F Ready! Enrolled templates in flash: %u", t_count);
+        if (t_count > 0) {
+            /* Если шаблоны уже есть, гасим светодиод в покое */
+            r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+        }
     } else {
         LOG_WRN("Could not retrieve template count (code 0x%02X)", count_ret);
     }
 
-    /* Подсветка в покое всегда выключена */
-    r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
-    LOG_INF("Dixo Keyboard biometric scanner ready (Standby, LED OFF)!");
+    LOG_INF("Dixo Keyboard biometric scanner ready!");
 
     bool last_touch = false;
     uint32_t idle_ticks = 0;

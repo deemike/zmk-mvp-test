@@ -45,19 +45,15 @@ int r502_send_command(const struct device *uart_dev,
 
     k_mutex_lock(&r502_lock, K_FOREVER);
 
-    /* Сбрасываем старые байты из буфера перед отправкой нового запроса */
+    /* Очищаем старые/непрочитанные байты из кольцевого буфера перед отправкой нового запроса */
     ring_buf_reset(&driver_rx_ringbuf);
-    uint8_t dummy;
-    while (uart_poll_in(uart_dev, &dummy) == 0) {
-        /* сброс мусора */
-    }
 
     /* Отправка данных по UART */
     for (int i = 0; i < pkg_len; i++) {
         uart_poll_out(uart_dev, tx_buf[i]);
     }
 
-    /* Ожидание и сборка полного ACK пакета */
+    /* Ожидание и сборка полного ACK пакета из кольцевого буфера */
     struct r502_parser local_parser;
     r502_parser_init(&local_parser);
     struct r502_ack_packet packet;
@@ -68,15 +64,7 @@ int r502_send_command(const struct device *uart_dev,
 
     while (k_uptime_get() < deadline) {
         uint8_t byte;
-        bool got_byte = false;
-
-        if (uart_poll_in(uart_dev, &byte) == 0) {
-            got_byte = true;
-        } else if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
-            got_byte = true;
-        }
-
-        if (got_byte) {
+        if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
             LOG_INF("UART RX: 0x%02X", byte);
             if (r502_parser_feed_byte(&local_parser, byte, &packet)) {
                 if (packet.pid == R502_PID_ACK) {
@@ -85,9 +73,12 @@ int r502_send_command(const struct device *uart_dev,
                 }
             }
         } else {
-            k_busy_wait(50);
+            k_msleep(2);
         }
     }
+
+    /* Технологическая пауза 20 мс между командами для микроконтроллера сканера */
+    k_msleep(20);
 
     if (!ack_received) {
         LOG_WRN("Timeout waiting for ACK on cmd 0x%02X", cmd);
@@ -117,18 +108,13 @@ int r502_set_led(const struct device *uart_dev,
                  uint8_t color,
                  uint8_t count) {
     uint8_t params[4] = { mode, speed, color, count };
-    uint8_t tx_buf[32];
-    int len = r502_build_command(tx_buf, sizeof(tx_buf), R502_CMD_AURA_LED, params, sizeof(params));
-    if (len > 0 && uart_dev && device_is_ready(uart_dev)) {
-        for (int i = 0; i < len; i++) {
-            uart_poll_out(uart_dev, tx_buf[i]);
-        }
-    }
-    return 0;
+    struct r502_ack_packet ack;
+    /* Сканер GROW R502-F всегда возвращает ACK на команду 0x35 */
+    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), &ack, 500);
 }
 
 int r502_get_image(const struct device *uart_dev) {
-    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 800);
+    return r502_send_command(uart_dev, R502_CMD_GET_IMAGE, NULL, 0, NULL, 1000);
 }
 
 int r502_image_to_tz(const struct device *uart_dev, uint8_t buffer_id) {
