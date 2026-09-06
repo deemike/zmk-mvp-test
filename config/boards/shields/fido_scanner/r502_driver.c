@@ -45,9 +45,6 @@ int r502_send_command(const struct device *uart_dev,
 
     k_mutex_lock(&r502_lock, K_FOREVER);
 
-    /* Очищаем кольцевой буфер перед отправкой новой команды */
-    ring_buf_reset(&driver_rx_ringbuf);
-
     /* Отправка данных по UART */
     for (int i = 0; i < pkg_len; i++) {
         uart_poll_out(uart_dev, tx_buf[i]);
