@@ -37,8 +37,18 @@
 &pinctrl {
     uart1_default: uart1_default {
         group1 {
-            psels = <NRF_PSEL(UART_TX, 1, 11)>, /* Xiao Pin D6 = TX */
-                    <NRF_PSEL(UART_RX, 1, 12)>; /* Xiao Pin D7 = RX */
+            psels = <NRF_PSEL(UART_TX, 1, 12)>; /* Xiao Pin D7 = TX (to Sensor RX / Brown) */
+        };
+        group2 {
+            psels = <NRF_PSEL(UART_RX, 1, 11)>; /* Xiao Pin D6 = RX (from Sensor TX / Yellow) */
+            bias-pull-up;
+        };
+    };
+    uart1_sleep: uart1_sleep {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 1, 12)>,
+                    <NRF_PSEL(UART_RX, 1, 11)>;
+            low-power-enable;
         };
     };
 };
@@ -47,7 +57,8 @@
     status = "okay";
     current-speed = <57600>;
     pinctrl-0 = <&uart1_default>;
-    pinctrl-names = "default";
+    pinctrl-1 = <&uart1_sleep>;
+    pinctrl-names = "default", "sleep";
 };
 
 /* Отключаем UART0, чтобы исключить конфликты с ZMK */

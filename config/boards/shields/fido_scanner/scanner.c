@@ -4,6 +4,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+#include <hal/nrf_uarte.h>
+#include <hal/nrf_gpio.h>
 
 #include "scanner.h"
 #include "r502_protocol.h"
@@ -315,6 +317,102 @@ static void do_verify_finger(void) {
     current_scanner_state = SCANNER_STATE_IDLE;
 }
 
+struct probe_cfg {
+    const char *desc;
+    uint32_t tx_pin;
+    uint32_t rx_pin;
+    nrf_uarte_baudrate_t baud_reg;
+    uint32_t baud_num;
+};
+
+static void apply_uart_hw_config(uint32_t tx_pin, uint32_t rx_pin, nrf_uarte_baudrate_t baud) {
+    nrf_uarte_disable(NRF_UARTE1);
+    nrf_uarte_txrx_pins_disconnect(NRF_UARTE1);
+
+    /* Настройка пинов: TX на выход (HIGH в покое), RX на вход с подтяжкой PULL_UP */
+    nrf_gpio_cfg_output(tx_pin);
+    nrf_gpio_pin_set(tx_pin);
+    nrf_gpio_cfg_input(rx_pin, NRF_GPIO_PIN_PULLUP);
+
+    nrf_uarte_txrx_pins_set(NRF_UARTE1, tx_pin, rx_pin);
+    nrf_uarte_baudrate_set(NRF_UARTE1, baud);
+
+    nrf_uarte_event_clear(NRF_UARTE1, NRF_UARTE_EVENT_ENDRX);
+    nrf_uarte_event_clear(NRF_UARTE1, NRF_UARTE_EVENT_ENDTX);
+    nrf_uarte_event_clear(NRF_UARTE1, NRF_UARTE_EVENT_ERROR);
+
+    nrf_uarte_enable(NRF_UARTE1);
+    nrf_uarte_task_trigger(NRF_UARTE1, NRF_UARTE_TASK_STARTRX);
+}
+
+static bool probe_scanner_connection(const struct device *dev) {
+    static const struct probe_cfg configs[] = {
+        { "Xiao D7 (P1.12)=TX -> Sensor RX (Brown), Xiao D6 (P1.11)=RX <- Sensor TX (Yellow)",
+          NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_57600, 57600 },
+        { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
+          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_57600, 57600 },
+        { "Xiao D7 (P1.12)=TX -> Sensor RX, Xiao D6 (P1.11)=RX <- Sensor TX",
+          NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_115200, 115200 },
+        { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
+          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_115200, 115200 },
+        { "Xiao D7 (P1.12)=TX -> Sensor RX, Xiao D6 (P1.11)=RX <- Sensor TX",
+          NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_9600, 9600 },
+        { "Xiao D6 (P1.11)=TX -> Sensor RX, Xiao D7 (P1.12)=RX <- Sensor TX",
+          NRF_GPIO_PIN_MAP(1, 11), NRF_GPIO_PIN_MAP(1, 12), NRF_UARTE_BAUDRATE_9600, 9600 },
+    };
+
+    LOG_INF("=================================================");
+    LOG_INF(">>> Starting R502-F Auto-Detection Probe... <<<");
+    LOG_INF("=================================================");
+
+    for (size_t i = 0; i < ARRAY_SIZE(configs); i++) {
+        const struct probe_cfg *cfg = &configs[i];
+        LOG_INF("Probe [%u/%u]: Testing %s @ %u baud...", (uint32_t)(i + 1), (uint32_t)ARRAY_SIZE(configs), cfg->desc, cfg->baud_num);
+
+        apply_uart_hw_config(cfg->tx_pin, cfg->rx_pin, cfg->baud_reg);
+        k_msleep(30);
+
+        /* 1. Проверяем команду Handshake (0x53) */
+        int ret = r502_handshake(dev);
+        if (ret == R502_ACK_OK) {
+            LOG_INF("=================================================");
+            LOG_INF(">>> [PROBE SUCCESS] Handshake confirmed! <<<");
+            LOG_INF(">>> Connected: %s @ %u baud <<<", cfg->desc, cfg->baud_num);
+            LOG_INF("=================================================");
+            return true;
+        }
+
+        /* 2. Проверяем команду Template Count (0x1D) */
+        uint16_t dummy_count = 0;
+        ret = r502_get_template_count(dev, &dummy_count);
+        if (ret == R502_ACK_OK) {
+            LOG_INF("=================================================");
+            LOG_INF(">>> [PROBE SUCCESS] Template count confirmed (%u templates)! <<<", dummy_count);
+            LOG_INF(">>> Connected: %s @ %u baud <<<", cfg->desc, cfg->baud_num);
+            LOG_INF("=================================================");
+            enrolled_templates_count = dummy_count;
+            return true;
+        }
+
+        /* 3. Проверяем команду Aura LED (0x35) */
+        ret = r502_set_led(dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
+        if (ret == R502_ACK_OK) {
+            LOG_INF("=================================================");
+            LOG_INF(">>> [PROBE SUCCESS] Aura LED confirmed! <<<");
+            LOG_INF(">>> Connected: %s @ %u baud <<<", cfg->desc, cfg->baud_num);
+            LOG_INF("=================================================");
+            return true;
+        }
+    }
+
+    LOG_WRN("=================================================");
+    LOG_WRN(">>> [PROBE FAILED] Sensor did not answer any UART permutation! <<<");
+    LOG_WRN(">>> Reverting to default (Xiao D7=TX, D6=RX @ 57600 baud) <<<");
+    LOG_WRN("=================================================");
+    apply_uart_hw_config(NRF_GPIO_PIN_MAP(1, 12), NRF_GPIO_PIN_MAP(1, 11), NRF_UARTE_BAUDRATE_57600);
+    return false;
+}
+
 /* Главный поток управления сканером */
 static void scanner_thread_func(void *p1, void *p2, void *p3) {
     uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
@@ -349,34 +447,24 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     LOG_INF("Waiting for R502-F sensor boot and calibration (1000ms)...");
     k_msleep(1000);
 
-    /* Проверка физической связи со сканером: включаем сиреневую пульсацию (Aura LED Purple Breathing) */
-    LOG_INF("Sending wake-up LED command (Purple Breathe) to R502-F on UART1...");
-    int led_ret = r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
-    if (led_ret == R502_ACK_OK) {
-        LOG_INF("=================================================");
-        LOG_INF(">>> R502-F Aura LED activated! Communication OK <<<");
-        LOG_INF("=================================================");
-    } else {
-        LOG_WRN("=================================================");
-        LOG_WRN(">>> WARNING: No ACK from R502-F on UART1 (code %d) <<<", led_ret);
-        LOG_WRN(">>> Verify wiring: D6 (Xiao TX) -> Sensor RX (White/Brown) <<<");
-        LOG_WRN(">>>                D7 (Xiao RX) -> Sensor TX (Yellow)      <<<");
-        LOG_WRN(">>>                VCC Pin 1 (Red) -> 3.3V (Sensor power)   <<<");
-        LOG_WRN("=================================================");
-    }
+    /* Запуск автоматического поиска правильной распиновки D6/D7 и скорости UART */
+    bool connected = probe_scanner_connection(uart_dev);
 
-    /* Запрос количества зарегистрированных шаблонов в Flash памяти сканера */
-    uint16_t t_count = 0;
-    int count_ret = r502_get_template_count(uart_dev, &t_count);
-    if (count_ret == R502_ACK_OK) {
-        enrolled_templates_count = t_count;
-        LOG_INF("R502-F Ready! Enrolled templates in flash: %u", t_count);
-        if (t_count > 0) {
-            /* Если шаблоны уже есть, гасим светодиод в покое */
-            r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+    if (connected) {
+        /* Включаем сиреневую пульсацию (Aura LED Purple Breathing) для наглядного подтверждения */
+        r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
+
+        uint16_t t_count = 0;
+        int count_ret = r502_get_template_count(uart_dev, &t_count);
+        if (count_ret == R502_ACK_OK) {
+            enrolled_templates_count = t_count;
+            LOG_INF("R502-F Ready! Enrolled templates in flash: %u", t_count);
+            if (t_count > 0) {
+                r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+            }
         }
     } else {
-        LOG_WRN("Could not retrieve template count (code 0x%02X)", count_ret);
+        LOG_WRN("Biometric scanner running in unlinked mode (waiting for touch)");
     }
 
     LOG_INF("Dixo Keyboard biometric scanner ready!");
