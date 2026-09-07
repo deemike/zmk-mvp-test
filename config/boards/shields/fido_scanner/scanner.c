@@ -41,6 +41,7 @@ static void uart_cb(const struct device *dev, void *user_data) {
         if (recv_len <= 0) {
             break;
         }
+        LOG_INF("--> RAW UART RX: %02X (len %d)", rx_buf[0], recv_len);
         r502_driver_feed_rx(rx_buf, recv_len);
     }
 }
@@ -353,6 +354,9 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     /* Пауза 3500 мс: емкостной сенсор R502-F требует время на калибровку матрицы и сброс микроконтроллера */
     LOG_INF("Waiting for R502-F sensor boot and calibration (3500ms)...");
     k_msleep(3500);
+
+    /* Принудительное включение белой пульсации для проверки TX линии */
+    r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_WHITE, 0);
 
     /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 57600) */
     bool connected = false;
