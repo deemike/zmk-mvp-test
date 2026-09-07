@@ -4,7 +4,6 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
-#include <hal/nrf_uarte.h>
 
 #include "scanner.h"
 #include "r502_protocol.h"
@@ -21,7 +20,6 @@ LOG_MODULE_REGISTER(scanner_fido, LOG_LEVEL_DBG);
 K_THREAD_STACK_DEFINE(scanner_stack_area, SCANNER_STACK_SIZE);
 static struct k_thread scanner_thread_data;
 
-static struct r502_parser parser;
 static const struct device *uart_dev;
 static const struct device *touch_dev;
 
@@ -50,7 +48,12 @@ static void uart_cb(const struct device *dev, void *user_data) {
 /* Проверка присутствия пальца на датчике */
 static bool is_finger_present(void) {
     if (touch_dev && device_is_ready(touch_dev)) {
-        return gpio_pin_get(touch_dev, TOUCH_PIN) > 0;
+        if (gpio_pin_get(touch_dev, TOUCH_PIN) > 0) {
+            return true;
+        }
+    }
+    if (uart_dev && device_is_ready(uart_dev)) {
+        return (r502_get_image(uart_dev) == R502_ACK_OK);
     }
     return false;
 }
@@ -313,16 +316,6 @@ static void do_verify_finger(void) {
         k_msleep(1500);
     }
 
-    /* Ждем, пока пользователь уберет палец со сканера */
-    uint32_t wait_lift = 0;
-    while (wait_lift < 2000) {
-        if (r502_get_image(uart_dev) == R502_ACK_NO_FINGER) {
-            break;
-        }
-        k_msleep(80);
-        wait_lift += 80;
-    }
-
     /* Выключение подсветки */
     r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
@@ -338,18 +331,12 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
         return;
     }
 
-    /* Инициализация протокола и драйвера */
-    r502_parser_init(&parser);
+    /* Инициализация драйвера */
     r502_driver_init();
 
     /* Настройка прерываний UART RX */
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
-
-    /* Активация аппаратного приемника UARTE1 */
-    nrf_uarte_enable(NRF_UARTE1);
-    nrf_uarte_event_clear(NRF_UARTE1, NRF_UARTE_EVENT_ENDRX);
-    nrf_uarte_task_trigger(NRF_UARTE1, NRF_UARTE_TASK_STARTRX);
 
     /* Настройка GPIO Touch Pin (D5) */
     if (device_is_ready(touch_dev)) {
@@ -411,20 +398,40 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             continue;
         }
 
-        /* Опрос пина D5 с программным антидребезгом */
+        /* Опрос пина D5 */
         int raw_pin = -1;
         if (touch_dev && device_is_ready(touch_dev)) {
             raw_pin = gpio_pin_get(touch_dev, TOUCH_PIN);
         }
 
-        bool is_touched = (raw_pin > 0);
+        bool is_touched = false;
+        if (raw_pin > 0) {
+            is_touched = true;
+        } else if (last_touch) {
+            /* Если палец уже был прижат (last_touch == true), но D5 == 0,
+             * опрашиваем UART, не снят ли палец */
+            is_touched = (r502_get_image(uart_dev) == R502_ACK_OK);
+        } else if (idle_ticks % 3 == 0) {
+            /* Режим ожидания: периодический опрос сканера по UART каждые 300 мс (фоллбэк при неактивном/неподключенном D5) */
+            is_touched = (r502_get_image(uart_dev) == R502_ACK_OK);
+        }
 
         if (is_touched && !last_touch) {
-            /* Переход LOW -> HIGH: антидребезг 50 мс */
-            k_msleep(50);
-            if (gpio_pin_get(touch_dev, TOUCH_PIN) > 0) {
+            bool confirmed = false;
+            if (raw_pin > 0) {
+                /* Переход LOW -> HIGH на пине D5: антидребезг 50 мс */
+                k_msleep(50);
+                if (gpio_pin_get(touch_dev, TOUCH_PIN) > 0) {
+                    confirmed = true;
+                }
+            } else {
+                /* Касание подтверждено опросом по UART */
+                confirmed = true;
+            }
+
+            if (confirmed) {
                 last_touch = true;
-                LOG_INF("Touch detected on Pin D5!");
+                LOG_INF("Touch detected%s!", (raw_pin > 0) ? " on Pin D5" : " via UART polling");
 
                 /* Если база пуста -> автоматически обучаем Мастер-палец в Слот 0 */
                 if (enrolled_templates_count == 0) {

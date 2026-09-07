@@ -2,7 +2,6 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/ring_buffer.h>
-#include <hal/nrf_uarte.h>
 #include <errno.h>
 
 LOG_MODULE_DECLARE(scanner_fido, LOG_LEVEL_DBG);
@@ -53,10 +52,6 @@ int r502_send_command(const struct device *uart_dev,
     for (int i = 0; i < pkg_len; i++) {
         uart_poll_out(uart_dev, tx_buf[i]);
     }
-
-    /* Активируем аппаратный приемник UARTE1 для получения ответа */
-    nrf_uarte_enable(NRF_UARTE1);
-    nrf_uarte_task_trigger(NRF_UARTE1, NRF_UARTE_TASK_STARTRX);
 
     /* Ожидание и сборка полного ACK пакета из кольцевого буфера */
     struct r502_parser local_parser;
