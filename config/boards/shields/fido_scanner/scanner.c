@@ -4,6 +4,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+#include <hal/nrf_uarte.h>
 
 #include "scanner.h"
 #include "r502_protocol.h"
@@ -345,6 +346,11 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     uart_irq_callback_set(uart_dev, uart_cb);
     uart_irq_rx_enable(uart_dev);
 
+    /* Активация аппаратного приемника UARTE1 */
+    nrf_uarte_enable(NRF_UARTE1);
+    nrf_uarte_event_clear(NRF_UARTE1, NRF_UARTE_EVENT_ENDRX);
+    nrf_uarte_task_trigger(NRF_UARTE1, NRF_UARTE_TASK_STARTRX);
+
     /* Настройка GPIO Touch Pin (D5) */
     if (device_is_ready(touch_dev)) {
         int err = gpio_pin_configure(touch_dev, TOUCH_PIN, GPIO_INPUT | GPIO_PULL_DOWN);
@@ -365,6 +371,11 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     bool connected = false;
     uint16_t t_count = 0;
     for (int attempt = 1; attempt <= 5; attempt++) {
+        /* Отправляем команду Handshake (0x53) для пробуждения интерфейса сканера */
+        int hs_ret = r502_handshake(uart_dev);
+        LOG_INF("Handshake (cmd 0x53) attempt %d/5 returned: 0x%02X", attempt, hs_ret);
+        k_msleep(50);
+
         int count_ret = r502_get_template_count(uart_dev, &t_count);
         if (count_ret == R502_ACK_OK) {
             connected = true;
@@ -374,13 +385,13 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             LOG_INF("=================================================");
             break;
         }
-        LOG_WRN("R502-F Handshake attempt %d/5 failed (ret=0x%02X), retrying...", attempt, count_ret);
+        LOG_WRN("Template count (cmd 0x1D) attempt %d/5 failed (ret=0x%02X), retrying...", attempt, count_ret);
         k_msleep(500);
     }
 
     if (connected) {
-        /* При успешном старте: мигаем 1 раз зеленым и выключаем подсветку (Standby) */
-        r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_GREEN, 1);
+        /* При успешном старте: включаем постоянный зеленый свет на 1 сек и выключаем подсветку (Standby) */
+        r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_GREEN, 0);
         k_msleep(1000);
         r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     } else {
