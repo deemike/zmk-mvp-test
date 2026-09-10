@@ -49,12 +49,7 @@ static void uart_cb(const struct device *dev, void *user_data) {
 /* Проверка присутствия пальца на датчике */
 static bool is_finger_present(void) {
     if (touch_dev && device_is_ready(touch_dev)) {
-        if (gpio_pin_get(touch_dev, TOUCH_PIN) > 0) {
-            return true;
-        }
-    }
-    if (uart_dev && device_is_ready(uart_dev)) {
-        return (r502_get_image(uart_dev) == R502_ACK_OK);
+        return gpio_pin_get(touch_dev, TOUCH_PIN) > 0;
     }
     return false;
 }
@@ -358,15 +353,10 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     /* Принудительное включение белой пульсации для проверки TX линии */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_WHITE, 0);
 
-    /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 9600) */
+    /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D7=TX, D6=RX @ 57600) */
     bool connected = false;
     uint16_t t_count = 0;
     for (int attempt = 1; attempt <= 5; attempt++) {
-        /* Отправляем команду Handshake (0x53) для пробуждения интерфейса сканера */
-        int hs_ret = r502_handshake(uart_dev);
-        LOG_INF("Handshake (cmd 0x53) attempt %d/5 returned: 0x%02X", attempt, hs_ret);
-        k_msleep(50);
-
         int count_ret = r502_get_template_count(uart_dev, &t_count);
         if (count_ret == R502_ACK_OK) {
             connected = true;
@@ -402,40 +392,20 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             continue;
         }
 
-        /* Опрос пина D5 */
+        /* Опрос пина D5 с программным антидребезгом */
         int raw_pin = -1;
         if (touch_dev && device_is_ready(touch_dev)) {
             raw_pin = gpio_pin_get(touch_dev, TOUCH_PIN);
         }
 
-        bool is_touched = false;
-        if (raw_pin > 0) {
-            is_touched = true;
-        } else if (last_touch) {
-            /* Если палец уже был прижат (last_touch == true), но D5 == 0,
-             * опрашиваем UART, не снят ли палец */
-            is_touched = (r502_get_image(uart_dev) == R502_ACK_OK);
-        } else if (idle_ticks % 3 == 0) {
-            /* Режим ожидания: периодический опрос сканера по UART каждые 300 мс (фоллбэк при неактивном/неподключенном D5) */
-            is_touched = (r502_get_image(uart_dev) == R502_ACK_OK);
-        }
+        bool is_touched = (raw_pin > 0);
 
         if (is_touched && !last_touch) {
-            bool confirmed = false;
-            if (raw_pin > 0) {
-                /* Переход LOW -> HIGH на пине D5: антидребезг 50 мс */
-                k_msleep(50);
-                if (gpio_pin_get(touch_dev, TOUCH_PIN) > 0) {
-                    confirmed = true;
-                }
-            } else {
-                /* Касание подтверждено опросом по UART */
-                confirmed = true;
-            }
-
-            if (confirmed) {
+            /* Переход LOW -> HIGH на пине D5: антидребезг 50 мс */
+            k_msleep(50);
+            if (gpio_pin_get(touch_dev, TOUCH_PIN) > 0) {
                 last_touch = true;
-                LOG_INF("Touch detected%s!", (raw_pin > 0) ? " on Pin D5" : " via UART polling");
+                LOG_INF("Touch detected on Pin D5!");
 
                 /* Если база пуста -> автоматически обучаем Мастер-палец в Слот 0 */
                 if (enrolled_templates_count == 0) {
