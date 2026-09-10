@@ -41,7 +41,12 @@ static void uart_cb(const struct device *dev, void *user_data) {
         if (recv_len <= 0) {
             break;
         }
-        LOG_INF("--> RAW UART RX: %02X (len %d)", rx_buf[0], recv_len);
+        if (recv_len == 1) {
+            LOG_INF("--> RAW UART RX (1 byte): 0x%02X", rx_buf[0]);
+        } else {
+            LOG_INF("--> RAW UART RX (%d bytes): 0x%02X 0x%02X 0x%02X 0x%02X ...",
+                    recv_len, rx_buf[0], rx_buf[1], (recv_len > 2 ? rx_buf[2] : 0), (recv_len > 3 ? rx_buf[3] : 0));
+        }
         r502_driver_feed_rx(rx_buf, recv_len);
     }
 }
@@ -353,7 +358,7 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     /* Принудительное включение белой пульсации для проверки TX линии */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_WHITE, 0);
 
-    /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D7=TX, D6=RX @ 57600) */
+    /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 57600) */
     bool connected = false;
     uint16_t t_count = 0;
     for (int attempt = 1; attempt <= 5; attempt++) {

@@ -67,7 +67,7 @@ int r502_send_command(const struct device *uart_dev,
         if (ring_buf_get(&driver_rx_ringbuf, &byte, 1) > 0) {
             if (r502_parser_feed_byte(&local_parser, byte, &packet)) {
                 if (packet.pid == R502_PID_ACK) {
-                    LOG_DBG("R502 ACK received: CMD=0x%02X, Code=0x%02X", cmd, packet.confirmation_code);
+                    LOG_INF("R502 ACK received: CMD=0x%02X, Code=0x%02X", cmd, packet.confirmation_code);
                     ack_received = true;
                     break;
                 }
