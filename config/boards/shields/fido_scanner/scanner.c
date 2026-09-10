@@ -358,7 +358,7 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     /* Принудительное включение белой пульсации для проверки TX линии */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_WHITE, 0);
 
-    /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 57600) */
+    /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 9600) */
     bool connected = false;
     uint16_t t_count = 0;
     for (int attempt = 1; attempt <= 5; attempt++) {
