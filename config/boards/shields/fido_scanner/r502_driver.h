@@ -7,10 +7,14 @@
 
 /* Таймауты ожидания ответа по умолчанию */
 #define R502_DEFAULT_TIMEOUT_MS     1000
-#define R502_CAPTURE_TIMEOUT_MS     2000
+#define R502_GET_IMAGE_TIMEOUT_MS   200
+#define R502_PROCESS_TIMEOUT_MS     1500
 
 /* Инициализация подсистемы драйвера сканера */
 void r502_driver_init(void);
+
+/* Проверка здоровья аппаратного UARTE и восстановление при ошибках переполнения */
+void r502_uart_health_check(const struct device *uart_dev);
 
 /* Передача принятых байт в кольцевой буфер драйвера из UART ISR */
 void r502_driver_feed_rx(const uint8_t *data, size_t len);
