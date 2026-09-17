@@ -149,8 +149,36 @@ static int do_enroll_finger(uint16_t slot_id) {
         current_scanner_state = SCANNER_STATE_IDLE;
         return ret;
     }
+    LOG_INF(">>> [1/2] Buffer 1 generated successfully! <<<");
 
-    /* Шаг 2: Извлечение характеристик в CharBuffer2 для синтеза модели */
+    /* Шаг 2: Захват второго снимка того же пальца (PS_GetImage) для синтеза модели */
+    LOG_INF(">>> Capturing second scan for template synthesis (keep holding)... <<<");
+    r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 1);
+    k_msleep(150);
+    r502_driver_flush_rx();
+
+    int64_t capture2_deadline = k_uptime_get() + 6000;
+    bool image2_ok = false;
+    while (k_uptime_get() < capture2_deadline) {
+        ret = r502_get_image(uart_dev);
+        if (ret == R502_ACK_OK) {
+            LOG_INF(">>> [2/2] Second fingerprint image captured! <<<");
+            image2_ok = true;
+            break;
+        }
+        k_msleep(40);
+    }
+
+    if (!image2_ok) {
+        LOG_ERR("Enrollment: Failed to capture second image: 0x%02X", ret);
+        r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
+        k_msleep(1500);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+        current_scanner_state = SCANNER_STATE_IDLE;
+        return ret;
+    }
+
+    /* Извлечение характеристик второго снимка в CharBuffer2 */
     k_msleep(30);
     r502_driver_flush_rx();
     ret = r502_image_to_tz(uart_dev, 2);
@@ -162,6 +190,7 @@ static int do_enroll_finger(uint16_t slot_id) {
         current_scanner_state = SCANNER_STATE_IDLE;
         return ret;
     }
+    LOG_INF(">>> [2/2] Buffer 2 generated successfully! <<<");
 
     /* Шаг 3: Синтез модели отпечатка (PS_RegModel) */
     k_msleep(30);
@@ -170,7 +199,7 @@ static int do_enroll_finger(uint16_t slot_id) {
     ret = r502_reg_model(uart_dev);
     LOG_INF("RegModel return code: 0x%02X", ret);
     if (ret != R502_ACK_OK) {
-        LOG_ERR("RegModel failed: 0x%02X", ret);
+        LOG_ERR("RegModel failed: 0x%02X (finger moved too much or not matching)", ret);
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         k_msleep(1500);
         r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
@@ -211,10 +240,10 @@ static int do_enroll_finger(uint16_t slot_id) {
     /* Ждем, пока пользователь уберет палец после завершения */
     int64_t done_deadline = k_uptime_get() + 3000;
     while (k_uptime_get() < done_deadline) {
-        if (r502_get_image(uart_dev) == R502_ACK_NO_FINGER) {
+        if (!is_finger_present()) {
             break;
         }
-        k_msleep(100);
+        k_msleep(50);
     }
     r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
     current_scanner_state = SCANNER_STATE_IDLE;
@@ -392,7 +421,18 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
                 last_touch = true;
                 LOG_INF("Touch detected on Pin D5!");
 
-                /* Если база пуста -> автоматически обучаем Мастер-палец в Слот 0 */
+                /* Если при старте сенсор спал и количество шаблонов было 0,
+                 * опрашиваем базу сенсора прямо сейчас (сенсор только что проснулся от касания) */
+                if (enrolled_templates_count == 0) {
+                    uint16_t current_count = 0;
+                    r502_driver_flush_rx();
+                    if (r502_get_template_count(uart_dev, &current_count) == R502_ACK_OK) {
+                        enrolled_templates_count = current_count;
+                        LOG_INF("Sensor active: %u template(s) in Flash library", enrolled_templates_count);
+                    }
+                }
+
+                /* Если база действительно пуста -> автоматически обучаем Мастер-палец в Слот 0 */
                 if (enrolled_templates_count == 0) {
                     LOG_INF("Library is empty! Enrolling Master Finger into Slot 0...");
                     do_enroll_finger(0);
