@@ -13,6 +13,9 @@
 /* Инициализация подсистемы драйвера сканера */
 void r502_driver_init(void);
 
+/* Аппаратное восстановление приемника nRF52840 UARTE EasyDMA */
+void r502_uart_recovery(const struct device *uart_dev);
+
 /* Проверка здоровья аппаратного UARTE и восстановление при ошибках переполнения */
 void r502_uart_health_check(const struct device *uart_dev);
 

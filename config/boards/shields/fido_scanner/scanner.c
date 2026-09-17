@@ -8,6 +8,7 @@
 #include "scanner.h"
 #include "r502_protocol.h"
 #include "r502_driver.h"
+#include <hal/nrf_uarte.h>
 
 LOG_MODULE_REGISTER(scanner_fido, LOG_LEVEL_DBG);
 
@@ -34,6 +35,19 @@ static void uart_cb(const struct device *dev, void *user_data) {
 
     if (!uart_irq_update(dev)) {
         return;
+    }
+
+    /* Проверка на аппаратные ошибки: если произошла ошибка линии, мгновенно восстанавливаем приёмник */
+    int err = uart_err_check(dev);
+    NRF_UARTE_Type *uarte = NRF_UARTE1;
+    if (err != 0 || nrf_uarte_event_check(uarte, NRF_UARTE_EVENT_ERROR)) {
+        nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ERROR);
+        nrf_uarte_errorsrc_get_and_clear(uarte);
+        uint8_t *rx_buf_ptr = nrf_uarte_rx_buffer_get(uarte);
+        if (rx_buf_ptr != NULL) {
+            nrf_uarte_rx_buffer_set(uarte, rx_buf_ptr, 1);
+            nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+        }
     }
 
     while (uart_irq_rx_ready(dev)) {
@@ -139,7 +153,15 @@ static int do_enroll_finger(uint16_t slot_id) {
     /* Шаг 2: Извлечение характеристик в CharBuffer2 для синтеза модели */
     k_msleep(30);
     r502_driver_flush_rx();
-    r502_image_to_tz(uart_dev, 2);
+    ret = r502_image_to_tz(uart_dev, 2);
+    if (ret != R502_ACK_OK) {
+        LOG_ERR("Img2Tz (Buffer 2) failed: 0x%02X", ret);
+        r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
+        k_msleep(1500);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+        current_scanner_state = SCANNER_STATE_IDLE;
+        return ret;
+    }
 
     /* Шаг 3: Синтез модели отпечатка (PS_RegModel) */
     k_msleep(30);
@@ -147,6 +169,14 @@ static int do_enroll_finger(uint16_t slot_id) {
     LOG_INF("Synthesizing fingerprint template (PS_RegModel)...");
     ret = r502_reg_model(uart_dev);
     LOG_INF("RegModel return code: 0x%02X", ret);
+    if (ret != R502_ACK_OK) {
+        LOG_ERR("RegModel failed: 0x%02X", ret);
+        r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
+        k_msleep(1500);
+        r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
+        current_scanner_state = SCANNER_STATE_IDLE;
+        return ret;
+    }
 
     /* Шаг 4: Сохранение шаблона в энергонезависимую Flash-память */
     k_msleep(30);
@@ -298,12 +328,12 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
         LOG_WRN("Touch GPIO device not ready");
     }
 
-    /* Пауза 3500 мс: емкостной сенсор R502-F требует время на калибровку матрицы и сброс микроконтроллера */
+    /* Пауза 4000 мс: емкостной сенсор R502-F требует время на калибровку матрицы и сброс микроконтроллера */
     LOG_INF("Waiting for R502-F sensor boot and calibration (4000ms)...");
     k_msleep(4000);
 
-    /* Сброс возможных ошибок линии во время включения питания сенсора */
-    r502_uart_health_check(uart_dev);
+    /* Сброс стартовых ошибок линии и гарантированный взвод EasyDMA STARTRX */
+    r502_uart_recovery(uart_dev);
     r502_driver_flush_rx();
 
     /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 57600) */

@@ -29,33 +29,56 @@ void r502_driver_notify_ack(const struct r502_ack_packet *packet) {
     ARG_UNUSED(packet);
 }
 
-/* Проверка здоровья аппаратного UARTE и восстановление при ошибках переполнения */
+/* Аппаратное восстановление приемника nRF52840 UARTE EasyDMA в строгом соответствии со спецификацией Nordic */
+void r502_uart_recovery(const struct device *uart_dev) {
+    if (!uart_dev) return;
+
+    NRF_UARTE_Type *uarte = NRF_UARTE1;
+
+    /* 1. Сброс битов ошибок в драйвере Zephyr и чтение аппаратных флагов */
+    int err = uart_err_check(uart_dev);
+    uint32_t errorsrc = nrf_uarte_errorsrc_get_and_clear(uarte);
+    (void)err;
+    (void)errorsrc;
+
+    /* 2. Принудительная остановка EasyDMA приемника */
+    nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STOPRX);
+
+    /* 3. Ожидание завершения аппаратной остановки по событию RXTO (до 1000 мкс) */
+    int wait_us = 1000;
+    while (!nrf_uarte_event_check(uarte, NRF_UARTE_EVENT_RXTO) && wait_us > 0) {
+        k_busy_wait(10);
+        wait_us -= 10;
+    }
+
+    /* 4. Очистка всех событий и аппаратных флагов ошибок */
+    nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_RXSTARTED);
+    nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_RXTO);
+    nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ENDRX);
+    nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ERROR);
+    nrf_uarte_errorsrc_get_and_clear(uarte);
+
+    /* 5. Перезапуск приема EasyDMA на 1-байтовый буфер Zephyr */
+    uint8_t *rx_buf = nrf_uarte_rx_buffer_get(uarte);
+    if (rx_buf != NULL) {
+        nrf_uarte_rx_buffer_set(uarte, rx_buf, 1);
+        nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
+    }
+}
+
+/* Проверка здоровья аппаратного UARTE и восстановление при любых ошибках */
 void r502_uart_health_check(const struct device *uart_dev) {
     if (!uart_dev) return;
 
-    /* Сброс битов ошибок в драйвере Zephyr */
     int err = uart_err_check(uart_dev);
-
-    /* Чтение и очистка аппаратных флагов Nordic UARTE1 */
     NRF_UARTE_Type *uarte = NRF_UARTE1;
     uint32_t errorsrc = nrf_uarte_errorsrc_get_and_clear(uarte);
-    nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ERROR);
+    bool has_hw_error = nrf_uarte_event_check(uarte, NRF_UARTE_EVENT_ERROR);
 
-    /* Только при аппаратном OVERRUN (бит 0) приемник EasyDMA останавливается и требует перезапуска */
-    if ((err & UART_ERROR_OVERRUN) || (errorsrc & NRF_UARTE_ERROR_OVERRUN_MASK)) {
-        LOG_WRN("UARTE1 Overrun detected (err=0x%02X, src=0x%02X). Recovering receiver...", err, errorsrc);
-        nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STOPRX);
-        k_busy_wait(15);
-        nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_RXSTARTED);
-        nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_RXTO);
-        nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ENDRX);
-        nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ERROR);
-
-        uint8_t *rx_buf = nrf_uarte_rx_buffer_get(uarte);
-        if (rx_buf != NULL) {
-            nrf_uarte_rx_buffer_set(uarte, rx_buf, 1);
-            nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STARTRX);
-        }
+    if (err != 0 || errorsrc != 0 || has_hw_error) {
+        LOG_WRN("UARTE1 line error detected (driver_err=0x%02X, src=0x%02X, hw=%d). Recovering receiver...",
+                err, errorsrc, (int)has_hw_error);
+        r502_uart_recovery(uart_dev);
     }
 }
 
@@ -80,13 +103,11 @@ int r502_send_command(const struct device *uart_dev,
 
     k_mutex_lock(&r502_lock, K_FOREVER);
 
-    /* Проверяем здоровье UARTE перед отправкой: сбрасываем аппаратные ошибки */
+    /* Проверяем здоровье UARTE перед отправкой */
     r502_uart_health_check(uart_dev);
 
-    /* Если в кольцевом буфере скопился избыточный мусор, сбрасываем его */
-    if (ring_buf_space_get(&driver_rx_ringbuf) < 64) {
-        ring_buf_reset(&driver_rx_ringbuf);
-    }
+    /* Всегда очищаем кольцевой буфер перед новой транзакцией, исключая старый мусор */
+    ring_buf_reset(&driver_rx_ringbuf);
 
     /* Отправка данных по UART */
     for (int i = 0; i < pkg_len; i++) {
@@ -122,8 +143,8 @@ int r502_send_command(const struct device *uart_dev,
 
     if (!ack_received) {
         LOG_WRN("Timeout waiting for ACK on cmd 0x%02X", cmd);
-        /* При таймауте проверяем состояние UARTE для предотвращения зависания RX */
-        r502_uart_health_check(uart_dev);
+        /* При таймауте безусловно восстанавливаем приемник UARTE */
+        r502_uart_recovery(uart_dev);
         k_mutex_unlock(&r502_lock);
         return -ETIMEDOUT;
     }
