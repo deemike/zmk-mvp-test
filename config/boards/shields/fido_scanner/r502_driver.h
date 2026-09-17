@@ -7,8 +7,8 @@
 
 /* Таймауты ожидания ответа по умолчанию */
 #define R502_DEFAULT_TIMEOUT_MS     1000
-#define R502_GET_IMAGE_TIMEOUT_MS   200
-#define R502_PROCESS_TIMEOUT_MS     1500
+#define R502_GET_IMAGE_TIMEOUT_MS   1200
+#define R502_PROCESS_TIMEOUT_MS     2000
 
 /* Инициализация подсистемы драйвера сканера */
 void r502_driver_init(void);

@@ -53,18 +53,6 @@ static bool is_finger_present(void) {
     return false;
 }
 
-/* Ожидание снятия пальца с датчика */
-static void wait_finger_release(uint32_t timeout_ms) {
-    uint32_t elapsed = 0;
-    while (elapsed < timeout_ms) {
-        if (!is_finger_present()) {
-            break;
-        }
-        k_msleep(50);
-        elapsed += 50;
-    }
-}
-
 /* Публичное API запроса регистрации пальца */
 int scanner_start_enroll(uint16_t slot_id) {
     if (slot_id >= 100) {
@@ -311,16 +299,12 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     }
 
     /* Пауза 3500 мс: емкостной сенсор R502-F требует время на калибровку матрицы и сброс микроконтроллера */
-    LOG_INF("Waiting for R502-F sensor boot and calibration (3500ms)...");
-    k_msleep(3500);
+    LOG_INF("Waiting for R502-F sensor boot and calibration (4000ms)...");
+    k_msleep(4000);
 
-    /* Сброс возможных ошибок линии во время включения питания сенсора (0x0C BREAK/FRAMING) */
+    /* Сброс возможных ошибок линии во время включения питания сенсора */
     r502_uart_health_check(uart_dev);
     r502_driver_flush_rx();
-
-    /* Принудительное включение белой пульсации для проверки TX линии */
-    r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_WHITE, 0);
-    k_msleep(150);
 
     /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 57600) */
     bool connected = false;
@@ -337,8 +321,8 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
             LOG_INF("=================================================");
             break;
         }
-        LOG_WRN("Template count (cmd 0x1D) attempt %d/5 failed (ret=0x%02X), retrying...", attempt, count_ret);
-        k_msleep(400);
+        LOG_WRN("Connection probe (cmd 0x1D) attempt %d/5 failed (ret=0x%02X), retrying...", attempt, count_ret);
+        k_msleep(500);
     }
 
     if (connected) {

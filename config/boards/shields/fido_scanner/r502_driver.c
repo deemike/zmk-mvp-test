@@ -33,29 +33,24 @@ void r502_driver_notify_ack(const struct r502_ack_packet *packet) {
 void r502_uart_health_check(const struct device *uart_dev) {
     if (!uart_dev) return;
 
-    /* 1. Сброс битов ошибок в драйвере Zephyr */
+    /* Сброс битов ошибок в драйвере Zephyr */
     int err = uart_err_check(uart_dev);
 
-    /* 2. Проверка аппаратных регистров Nordic UARTE1 */
+    /* Чтение и очистка аппаратных флагов Nordic UARTE1 */
     NRF_UARTE_Type *uarte = NRF_UARTE1;
-    bool has_hw_error = nrf_uarte_event_check(uarte, NRF_UARTE_EVENT_ERROR);
+    uint32_t errorsrc = nrf_uarte_errorsrc_get_and_clear(uarte);
+    nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ERROR);
 
-    if (err != 0 || has_hw_error) {
-        LOG_WRN("UARTE1 error detected (driver_err=0x%02X, hw_event=%d). Recovering receiver...",
-                err, (int)has_hw_error);
-
-        /* Принудительная остановка зависшего RX EasyDMA */
+    /* Только при аппаратном OVERRUN (бит 0) приемник EasyDMA останавливается и требует перезапуска */
+    if ((err & UART_ERROR_OVERRUN) || (errorsrc & NRF_UARTE_ERROR_OVERRUN_MASK)) {
+        LOG_WRN("UARTE1 Overrun detected (err=0x%02X, src=0x%02X). Recovering receiver...", err, errorsrc);
         nrf_uarte_task_trigger(uarte, NRF_UARTE_TASK_STOPRX);
         k_busy_wait(15);
-
-        /* Очистка всех аппаратных событий и флагов ошибок */
         nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_RXSTARTED);
         nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_RXTO);
         nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ENDRX);
         nrf_uarte_event_clear(uarte, NRF_UARTE_EVENT_ERROR);
-        nrf_uarte_errorsrc_get_and_clear(uarte);
 
-        /* Перезапуск приема EasyDMA на штатный 1-байтовый буфер Zephyr */
         uint8_t *rx_buf = nrf_uarte_rx_buffer_get(uarte);
         if (rx_buf != NULL) {
             nrf_uarte_rx_buffer_set(uarte, rx_buf, 1);
@@ -157,7 +152,7 @@ int r502_set_led(const struct device *uart_dev,
     uint8_t params[4] = { mode, speed, color, count };
     struct r502_ack_packet ack;
     /* Сканер GROW R502-F всегда возвращает ACK на команду 0x35 */
-    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), &ack, 300);
+    return r502_send_command(uart_dev, R502_CMD_AURA_LED, params, sizeof(params), &ack, 600);
 }
 
 int r502_get_image(const struct device *uart_dev) {
@@ -224,7 +219,7 @@ int r502_empty(const struct device *uart_dev) {
 
 int r502_get_template_count(const struct device *uart_dev, uint16_t *count) {
     struct r502_ack_packet ack;
-    int ret = r502_send_command(uart_dev, R502_CMD_TEMPLATE_COUNT, NULL, 0, &ack, 500);
+    int ret = r502_send_command(uart_dev, R502_CMD_TEMPLATE_COUNT, NULL, 0, &ack, 800);
     if (ret == R502_ACK_OK && ack.data_len >= 2) {
         if (count) {
             *count = (((uint16_t)ack.data[0]) << 8) | ack.data[1];
