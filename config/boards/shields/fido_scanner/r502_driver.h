@@ -16,6 +16,9 @@ void r502_driver_init(void);
 /* Проверка здоровья аппаратного UARTE и восстановление при ошибках переполнения */
 void r502_uart_health_check(const struct device *uart_dev);
 
+/* Принудительная очистка кольцевого буфера от устаревших ответов */
+void r502_driver_flush_rx(void);
+
 /* Передача принятых байт в кольцевой буфер драйвера из UART ISR */
 void r502_driver_feed_rx(const uint8_t *data, size_t len);
 

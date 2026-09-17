@@ -21,6 +21,10 @@ void r502_driver_feed_rx(const uint8_t *data, size_t len) {
     }
 }
 
+void r502_driver_flush_rx(void) {
+    ring_buf_reset(&driver_rx_ringbuf);
+}
+
 void r502_driver_notify_ack(const struct r502_ack_packet *packet) {
     ARG_UNUSED(packet);
 }

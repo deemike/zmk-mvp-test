@@ -97,13 +97,12 @@ static int do_enroll_finger(uint16_t slot_id) {
     current_scanner_state = SCANNER_STATE_ENROLLING;
 
     LOG_INF("=================================================");
-    LOG_INF(">>> ENROLLMENT MODE: Preparing to enroll Finger into Slot %u <<<", slot_id);
+    LOG_INF(">>> [ENROLLMENT] Registering Master Finger into Slot %u <<<", slot_id);
+    LOG_INF(">>> [STEP 1/2] Please touch sensor with Master Finger... <<<");
     LOG_INF("=================================================");
 
     /* Шаг 1: Индикация фиолетовым дыханием */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_PURPLE, 0);
-    LOG_INF("Step 1/2: Please place and hold your finger firmly on the sensor...");
-
     k_msleep(200);
 
     /* Ожидание и захват 1-го снимка (до 15 секунд).
@@ -115,7 +114,7 @@ static int do_enroll_finger(uint16_t slot_id) {
     while (k_uptime_get() < step1_deadline) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
-            LOG_INF("Step 1: Fingerprint image 1 captured successfully!");
+            LOG_INF(">>> Step 1/2: Image 1 captured! <<<");
             image1_ok = true;
             break;
         } else if (ret == R502_ACK_NO_FINGER) {
@@ -135,8 +134,11 @@ static int do_enroll_finger(uint16_t slot_id) {
         return -ETIMEDOUT;
     }
 
+    /* Очищаем буфер от устаревших ответов GetImage перед конвертацией */
+    k_msleep(30);
+    r502_driver_flush_rx();
+
     /* Преобразование 1-го снимка в характеристики CharBuffer1 (timeout 1500 мс) */
-    k_msleep(50);
     ret = r502_image_to_tz(uart_dev, 1);
     if (ret != R502_ACK_OK) {
         LOG_ERR("Img2Tz (Buffer 1) failed: 0x%02X", ret);
@@ -147,11 +149,15 @@ static int do_enroll_finger(uint16_t slot_id) {
         return ret;
     }
 
-    /* Сигнализируем успех 1-го считывания: постоянный зеленый свет на 700 мс */
+    /* Сигнализируем успех 1-го считывания: зеленый свет на 700 мс */
     r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_GREEN, 0);
     k_msleep(700);
     r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
-    LOG_INF("Step 1 OK! Please LIFT your finger from the sensor...");
+
+    LOG_INF("=================================================");
+    LOG_INF(">>> STEP 1 OK! Please LIFT your finger! <<<");
+    LOG_INF(">>> Then place the EXACT SAME FINGER again! <<<");
+    LOG_INF("=================================================");
 
     /* Ждем, пока пользователь снимет палец со сканера (до 6 секунд) */
     int64_t lift_deadline = k_uptime_get() + 6000;
@@ -165,8 +171,8 @@ static int do_enroll_finger(uint16_t slot_id) {
     }
     k_msleep(300);
 
-    /* Шаг 2: Индикация фиолетовым миганием, ожидание 2-го касания */
-    LOG_INF("Step 2/2: Place the SAME finger again firmly on the sensor...");
+    /* Шаг 2: Индикация фиолетовым миганием, ожидание 2-го касания ТОГО ЖЕ пальца */
+    LOG_INF(">>> [STEP 2/2] Place the SAME finger again firmly on sensor... <<<");
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x20, R502_LED_COLOR_PURPLE, 0);
 
     int64_t step2_deadline = k_uptime_get() + 15000;
@@ -175,7 +181,7 @@ static int do_enroll_finger(uint16_t slot_id) {
     while (k_uptime_get() < step2_deadline) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
-            LOG_INF("Step 2: Fingerprint image 2 captured successfully!");
+            LOG_INF(">>> Step 2/2: Image 2 captured! <<<");
             image2_ok = true;
             break;
         } else if (ret == R502_ACK_NO_FINGER) {
@@ -195,8 +201,11 @@ static int do_enroll_finger(uint16_t slot_id) {
         return -ETIMEDOUT;
     }
 
+    /* Очищаем буфер от устаревших ответов GetImage перед конвертацией */
+    k_msleep(30);
+    r502_driver_flush_rx();
+
     /* Преобразование 2-го снимка в CharBuffer2 (timeout 1500 мс) */
-    k_msleep(50);
     ret = r502_image_to_tz(uart_dev, 2);
     if (ret != R502_ACK_OK) {
         LOG_ERR("Img2Tz (Buffer 2) failed: 0x%02X", ret);
@@ -208,11 +217,15 @@ static int do_enroll_finger(uint16_t slot_id) {
     }
 
     /* Шаг 3: Объединение моделей (timeout 1500 мс) */
-    k_msleep(50);
-    LOG_INF("Combining models (PS_RegModel)...");
+    k_msleep(30);
+    r502_driver_flush_rx();
+    LOG_INF("Fusing fingerprint models (PS_RegModel)...");
     ret = r502_reg_model(uart_dev);
     if (ret != R502_ACK_OK) {
-        LOG_ERR("RegModel failed (prints do not match): 0x%02X", ret);
+        LOG_ERR("=================================================");
+        LOG_ERR(">>> ENROLLMENT FAILED: Touches 1 and 2 did NOT match (0x%02X)! <<<", ret);
+        LOG_ERR(">>> You must use the EXACT SAME finger for both touches! <<<");
+        LOG_ERR("=================================================");
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         k_msleep(2000);
         r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
@@ -221,15 +234,17 @@ static int do_enroll_finger(uint16_t slot_id) {
     }
 
     /* Шаг 4: Сохранение шаблона в Flash (timeout 1500 мс) */
-    k_msleep(50);
+    k_msleep(30);
+    r502_driver_flush_rx();
     LOG_INF("Storing model into Slot %u...", slot_id);
     ret = r502_store_char(uart_dev, 1, slot_id);
     if (ret == R502_ACK_OK) {
         LOG_INF("=================================================");
-        LOG_INF(">>> ENROLLMENT SUCCESSFUL! Master finger stored in Slot %u <<<", slot_id);
+        LOG_INF(">>> SUCCESS! Master Finger registered in Slot %u! <<<", slot_id);
+        LOG_INF(">>> Scanner is now in VERIFICATION MODE! <<<");
         LOG_INF("=================================================");
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_GREEN, 0);
-        enrolled_templates_count++;
+        enrolled_templates_count = (slot_id + 1 > enrolled_templates_count) ? (slot_id + 1) : enrolled_templates_count;
         k_msleep(3000);
     } else {
         LOG_ERR("StoreChar failed: 0x%02X", ret);
@@ -258,11 +273,11 @@ static void do_verify_finger(void) {
 
     current_scanner_state = SCANNER_STATE_VERIFYING;
 
+    LOG_INF(">>> [VERIFY] Finger detected, scanning... <<<");
+
     /* Мгновенная визуальная индикация: синий блик */
     r502_set_led(uart_dev, R502_LED_MODE_FLASHING, 0x10, R502_LED_COLOR_BLUE, 1);
-
-    /* Небольшая пауза 60 мс */
-    k_msleep(60);
+    k_msleep(50);
 
     /* Захват изображения отпечатка (до 3 секунд пока палец прижимают) */
     int64_t verify_deadline = k_uptime_get() + 3000;
@@ -270,7 +285,7 @@ static void do_verify_finger(void) {
     while (k_uptime_get() < verify_deadline) {
         ret = r502_get_image(uart_dev);
         if (ret == R502_ACK_OK) {
-            LOG_INF("Fingerprint image captured successfully!");
+            LOG_INF("Fingerprint image captured!");
             image_ok = true;
             break;
         }
@@ -279,7 +294,6 @@ static void do_verify_finger(void) {
 
     if (!image_ok) {
         LOG_WRN("GetImage failed or finger lifted too fast (code 0x%02X)", ret);
-        /* Ошибка считывания -> Красный свет на 1 сек */
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         k_msleep(1000);
         r502_set_led(uart_dev, R502_LED_MODE_OFF, 0x00, 0x00, 0);
@@ -287,8 +301,11 @@ static void do_verify_finger(void) {
         return;
     }
 
+    /* Очищаем буфер от устаревших ответов GetImage перед конвертацией */
+    k_msleep(20);
+    r502_driver_flush_rx();
+
     /* Извлечение характеристик в CharBuffer1 */
-    k_msleep(30);
     ret = r502_image_to_tz(uart_dev, 1);
     if (ret != R502_ACK_OK) {
         LOG_WRN("Img2Tz failed: 0x%02X", ret);
@@ -300,13 +317,14 @@ static void do_verify_finger(void) {
     }
 
     /* Поиск по базе сохраненных отпечатков (слоты 0 - 100) */
-    k_msleep(30);
+    k_msleep(20);
+    r502_driver_flush_rx();
     ret = r502_search(uart_dev, 1, 0, 100, &found_page, &score);
     if (ret == R502_ACK_OK) {
         /* УСПЕХ: Отпечаток найден в базе -> Зеленый свет на 1.5 сек */
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_GREEN, 0);
         LOG_INF("=================================================");
-        LOG_INF(">>> [ZMK_FIDO_AUTH] User verified! Slot: %u, Score: %u <<<", found_page, score);
+        LOG_INF(">>> [ZMK_FIDO_AUTH] ACCESS GRANTED! Slot: %u, Score: %u <<<", found_page, score);
         LOG_INF("=================================================");
         scanner_on_auth_event(true, found_page, score);
         k_msleep(1500);
@@ -314,7 +332,7 @@ static void do_verify_finger(void) {
         /* НЕУДАЧА: Нераспознанный отпечаток -> Красный свет на 1.5 сек */
         r502_set_led(uart_dev, R502_LED_MODE_ON, 0x00, R502_LED_COLOR_RED, 0);
         LOG_WRN("=================================================");
-        LOG_WRN(">>> [ZMK_FIDO_AUTH] Verification failed (No match, code 0x%02X) <<<", ret);
+        LOG_WRN(">>> [ZMK_FIDO_AUTH] ACCESS DENIED (No match, code 0x%02X) <<<", ret);
         LOG_WRN("=================================================");
         scanner_on_auth_event(false, 0, 0);
         k_msleep(1500);
@@ -358,25 +376,31 @@ static void scanner_thread_func(void *p1, void *p2, void *p3) {
     LOG_INF("Waiting for R502-F sensor boot and calibration (3500ms)...");
     k_msleep(3500);
 
+    /* Сброс возможных ошибок линии во время включения питания сенсора (0x0C BREAK/FRAMING) */
+    r502_uart_health_check(uart_dev);
+    r502_driver_flush_rx();
+
     /* Принудительное включение белой пульсации для проверки TX линии */
     r502_set_led(uart_dev, R502_LED_MODE_BREATHING, 0xFF, R502_LED_COLOR_WHITE, 0);
-    k_msleep(100);
+    k_msleep(150);
 
     /* Проверка связи с R502-F (до 5 попыток через нативный UART1 D6=TX, D7=RX @ 57600) */
     bool connected = false;
     uint16_t t_count = 0;
     for (int attempt = 1; attempt <= 5; attempt++) {
+        r502_uart_health_check(uart_dev);
+        r502_driver_flush_rx();
         int count_ret = r502_get_template_count(uart_dev, &t_count);
         if (count_ret == R502_ACK_OK) {
             connected = true;
             enrolled_templates_count = t_count;
             LOG_INF("=================================================");
-            LOG_INF(">>> R502-F Connected! Enrolled templates: %u <<<", t_count);
+            LOG_INF(">>> R502-F Connected! Enrolled templates in library: %u <<<", t_count);
             LOG_INF("=================================================");
             break;
         }
         LOG_WRN("Template count (cmd 0x1D) attempt %d/5 failed (ret=0x%02X), retrying...", attempt, count_ret);
-        k_msleep(500);
+        k_msleep(400);
     }
 
     if (connected) {
